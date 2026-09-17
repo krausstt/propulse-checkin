@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ProPulse - Scanner Link Diagnostic</title>
+<style>
+  :root {
+    --bg: #12141a; --card: #1c1f27; --line: #2e333f; --ink: #e8eaf0;
+    --dim: #949cad; --ok: #4ade80; --bad: #f87171; --warn: #fbbf24; --accent: #60a5fa;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; padding: 12px; background: var(--bg); color: var(--ink);
+         font: 15px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  h1 { font-size: 17px; margin: 0 0 2px; }
+  .sub { color: var(--dim); font-size: 12px; margin-bottom: 12px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+          padding: 12px; margin-bottom: 10px; }
+  .card h2 { font-size: 13px; margin: 0 0 8px; color: var(--accent);
+             text-transform: uppercase; letter-spacing: .06em; }
+  button { width: 100%; padding: 14px; margin: 5px 0; font-size: 15px; font-weight: 600;
+           border: 1px solid var(--line); border-radius: 8px; background: #262b36;
+           color: var(--ink); cursor: pointer; }
+  button:active { background: #323845; }
+  button.primary { background: var(--accent); color: #08111f; border-color: var(--accent); }
+  button.danger  { background: #3b2226; border-color: #5b2f36; color: #fca5a5; }
+  #log { background: #0b0d12; border: 1px solid var(--line); border-radius: 8px; padding: 10px;
+         font: 12px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace; white-space: pre-wrap;
+         word-break: break-word; height: 46vh; overflow-y: auto; }
+  .ok { color: var(--ok); } .bad { color: var(--bad); }
+  .warn { color: var(--warn); } .dim { color: var(--dim); }
+  .env { font: 11px/1.5 ui-monospace, Consolas, monospace; color: var(--dim); word-break: break-all; }
+  .note { background: #2a2113; border: 1px solid #56451f; color: #fcd34d;
+          padding: 9px; border-radius: 8px; font-size: 12.5px; margin-bottom: 10px; }
+</style>
+</head>
+<body>
+
+<h1>ProPulse - Scanner Link Diagnostic</h1>
+<div class="sub">Settles whether an HTTPS page may reach <code>ws://localhost:9998</code> on this phone.</div>
+
+<div class="note">
+  <b>Run the tests in order, top to bottom.</b> If a permission prompt appears, always tap
+  <b>Allow</b>. Chrome blocks an origin permanently after <b>three dismissals</b>, and there is no
+  in-app way back from that - so never swipe the prompt away.
+</div>
+
+<div class="card">
+  <h2>Environment</h2>
+  <div class="env" id="env">collecting…</div>
+</div>
+
+<div class="card">
+  <h2>Test A - Local Network Access</h2>
+  <button id="bPerm">A1 · Probe permission names</button>
+  <button id="bConn" class="primary">A2 · Connect (with user gesture)</button>
+  <button id="bAuto">A3 · Reload and connect with NO gesture</button>
+  <button id="bPersist">A4 · Check grant persistence</button>
+</div>
+
+<div class="card">
+  <h2>Test B - Streams API</h2>
+  <button id="bListen">B1 · Listen 60 s, then scan a badge</button>
+  <button id="bDisplay">B2 · Send display_v2! to the MAI</button>
+  <button id="bLong">B3 · Send longest-name legibility test</button>
+  <button id="bBad">B4 · Send a deliberately invalid command</button>
+</div>
+
+<div class="card">
+  <h2>Log</h2>
+  <button id="bCopy">Copy log to clipboard</button>
+  <button id="bClear" class="danger">Clear</button>
+  <div id="log"></div>
+</div>
+
+<script type="module">
+const WS_URL = 'ws://localhost:9998';   // literal loopback host - see note at bottom of file
+const logEl = document.getElementById('log');
+let ws = null, learned = { device_serial: null, gateway_serial: null };
+
+const t0 = performance.now();
+function log(msg, cls) {
+  const ms = String(Math.round(performance.now() - t0)).padStart(6);
+  const line = document.createElement('div');
+  if (cls) line.className = cls;
+  line.textContent = `${ms}ms  ${msg}`;
+  logEl.appendChild(line);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+// --- environment ---------------------------------------------------------
+(function env() {
+  const standalone = window.matchMedia('(display-mode: standalone)').matches;
+  const rows = [
+    `UA        ${navigator.userAgent}`,
+    `origin    ${location.origin}`,
+    `secure    ${window.isSecureContext}`,
+    `display   ${standalone ? 'standalone (installed PWA)' : 'browser tab'}`,
+    `online    ${navigator.onLine}`,
+    `launches  ${bumpLaunchCount()}`,
+  ];
+  document.getElementById('env').textContent = rows.join('\n');
+  log(`page loaded · ${standalone ? 'INSTALLED PWA' : 'browser tab'} · secureContext=${window.isSecureContext}`, 'dim');
+  if (new URLSearchParams(location.search).get('auto') === '1') {
+    log('?auto=1 present - connecting with NO user gesture', 'warn');
+    connect('no-gesture');
+  }
+})();
+
+function bumpLaunchCount() {
+  try {
+    const n = Number(localStorage.getItem('launches') || 0) + 1;
+    localStorage.setItem('launches', String(n));
+    return n;
+  } catch { return 'n/a'; }
+}
+
+// --- Test A1: which permission name does this Chrome know? ---------------
+// The WICG spec registers "local-network" and "loopback-network"; Chromium also
+// carries "local-network-access" as a legacy alias. Which one is live is exactly
+// what we cannot establish from documentation - so probe all three.
+document.getElementById('bPerm').onclick = async () => {
+  log('--- A1 permission probe ---');
+  if (!navigator.permissions) { log('navigator.permissions unavailable', 'bad'); return; }
+  for (const name of ['loopback-network', 'local-network', 'local-network-access', 'geolocation']) {
+    try {
+      const s = await navigator.permissions.query({ name });
+      log(`  ${name.padEnd(22)} -> ${s.state}`, s.state === 'granted' ? 'ok' : 'warn');
+    } catch (e) {
+      log(`  ${name.padEnd(22)} -> throws ${e.name}: ${e.message}`, 'dim');
+    }
+  }
+  log('(geolocation is the control - it must return a state, proving the probe works)', 'dim');
+};
+
+// --- connect -------------------------------------------------------------
+function connect(reason) {
+  if (ws && ws.readyState <= 1) { log('already open/connecting', 'warn'); return; }
+  log(`--- connecting to ${WS_URL} (${reason}) ---`);
+  const started = performance.now();
+  try { ws = new WebSocket(WS_URL); }
+  catch (e) { log(`constructor threw ${e.name}: ${e.message}`, 'bad'); return; }
+
+  ws.onopen = () => {
+    log(`OPEN after ${Math.round(performance.now() - started)}ms - loopback is reachable`, 'ok');
+    try { localStorage.setItem('everConnected', '1'); } catch {}
+  };
+  ws.onerror = () => {
+    const dt = Math.round(performance.now() - started);
+    log(`ERROR after ${dt}ms (readyState=${ws.readyState})`, 'bad');
+    // Be honest: an LNA block and a plain "connection refused" both fail in a few
+    // milliseconds on loopback, and the WebSocket API deliberately hides the reason
+    // from script. Timing cannot separate them, so do not pretend it can.
+    log('  Script CANNOT tell why. LNA-blocked and nothing-listening look identical here.', 'warn');
+    log('  Separate them by hand:', 'warn');
+    log('    - Did a permission prompt appear just now?  -> LNA is live and promptable.');
+    log('    - No prompt: is INSIGHT Mobile running, foreground, WebSocket path ON?');
+    log('    - Still failing: chrome://net-export, record, retry, grep the JSON for -385');
+    log('      (-385 = ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS = LNA. Anything else = not LNA.)');
+  };
+  ws.onclose = (e) => log(`CLOSE code=${e.code} reason=${e.reason || '(none)'} clean=${e.wasClean}`, 'warn');
+  ws.onmessage = (e) => {
+    log(`<- ${e.data}`);
+    try {
+      const m = JSON.parse(e.data);
+      for (const k of ['device_serial', 'gateway_serial']) {
+        if (m[k] && learned[k] !== m[k]) { learned[k] = m[k]; log(`   learned ${k} = ${m[k]}`, 'ok'); }
+      }
+      if (m.event_type) log(`   event_type = ${m.event_type}`, 'dim');
+    } catch { log('   (not JSON)', 'dim'); }
+  };
+}
+
+document.getElementById('bConn').onclick = () => connect('user gesture');
+document.getElementById('bAuto').onclick = () => { location.search = '?auto=1'; };
+
+document.getElementById('bPersist').onclick = () => {
+  log('--- A4 persistence ---');
+  let ever = null;
+  try { ever = localStorage.getItem('everConnected'); } catch {}
+  log(`this origin has connected successfully before: ${ever ? 'yes' : 'no'}`);
+  log('Now do this by hand, in order:', 'warn');
+  log('  1. Reload the page and tap A2. Prompted again?');
+  log('  2. Force-stop Chrome (Android Settings > Apps > Chrome > Force stop), reopen, tap A2. Prompted again?');
+  log('  3. "Add to Home screen", launch it, tap A2. Prompted again?');
+  log('If step 2 prompts again, the grant is per-session and every phone needs it every morning.', 'warn');
+};
+
+// --- Test B: Streams API -------------------------------------------------
+function requireOpen() {
+  if (!ws || ws.readyState !== WebSocket.OPEN) { log('socket not open - run A2 first', 'bad'); return false; }
+  return true;
+}
+
+document.getElementById('bListen').onclick = () => {
+  if (!requireOpen()) return;
+  log('--- B1: logging every inbound frame for 60 s. Scan a badge now. ---', 'warn');
+  setTimeout(() => log('--- B1 window closed ---', 'warn'), 60000);
+};
+
+function displayCommand({ id, name, host, badge }) {
+  return {
+    active_screen_view: 'SCREEN_VIEW_1',
+    api_version: '3.0',
+    device_serial: learned.device_serial || 'UNKNOWN_DEVICE_SERIAL',
+    event_id: crypto.randomUUID(),
+    event_type: 'display_v2!',
+    forced_orientation: 'LANDSCAPE',
+    gateway_serial: learned.gateway_serial || undefined,
+    ref_id: 'SCREEN_1',
+    ack_required: 'ON_HANDLED',
+    screen_views: [{
+      ref_id: 'SCREEN_VIEW_1',
+      pg_work4_t4: {
+        title: 'ProPulse 2026 Chicago',
+        field_top_left:    { text_header: 'ID',             text_content: id,    ref_id: 'field_top_left_ref' },
+        field_top_right:   { text_header: 'Host',           text_content: host,  ref_id: 'field_top_right_ref' },
+        field_middle_left: { text_header: 'Badge Location', text_content: badge, ref_id: 'field_middle_left_ref' },
+        field_bottom:      { text_header: 'Full Name of Visitor', text_content: name,
+                             ref_id: 'field_bottom_ref', state: { type: 'FOCUSED', highlighted: true } },
+      },
+    }],
+    time_created: Date.now(),
+  };
+}
+
+function send(obj, label) {
+  if (!requireOpen()) return;
+  if (!learned.device_serial) {
+    log('No device_serial learned yet - scan one badge first (B1) so we can read it off the scan event.', 'warn');
+  }
+  const s = JSON.stringify(obj);
+  log(`-> ${label} (${s.length} bytes)`);
+  log(`   ${s}`, 'dim');
+  ws.send(s);
+  log('   watch for an "errors" frame, or a ping frame with ack_event_id', 'dim');
+}
+
+document.getElementById('bDisplay').onclick = () =>
+  send(displayCommand({ id: '1', name: 'Norman Wang', host: 'Rohan', badge: 'B-12' }), 'display_v2! (normal)');
+
+document.getElementById('bLong').onclick = () =>
+  send(displayCommand({
+    id: '1888',
+    name: 'Bartholomew Wolfeschlegelstein',
+    host: 'Margarita',
+    badge: 'Hall 3 / B-24',
+  }), 'display_v2! (longest realistic strings)');
+
+document.getElementById('bBad').onclick = () => {
+  const bad = displayCommand({ id: '1', name: 'X', host: 'Y', badge: 'Z' });
+  bad.screen_views[0].pg_work4_t4.field_bottom.ref_id = 'x'.repeat(40);
+  send(bad, 'deliberately invalid (40-char ref_id)');
+};
+
+// --- log utilities -------------------------------------------------------
+document.getElementById('bCopy').onclick = async () => {
+  const text = `${document.getElementById('env').textContent}\n\n${logEl.innerText}`;
+  try { await navigator.clipboard.writeText(text); log('log copied', 'ok'); }
+  catch { log('clipboard blocked - long-press the log and copy by hand', 'bad'); }
+};
+document.getElementById('bClear').onclick = () => { logEl.textContent = ''; };
+
+window.onerror = (m, s, l, c, e) => log(`window.onerror: ${m} ${e ? e.stack : ''}`, 'bad');
+window.onunhandledrejection = (e) => log(`unhandled rejection: ${e.reason}`, 'bad');
+</script>
+
+<!--
+  WHY THE LITERAL HOST MATTERS
+  Mixed Content evaluates the loopback carve-out syntactically, on the hostname, BEFORE DNS
+  resolution - and unlike fetch(), the WebSocket API has no targetAddressSpace option to
+  override it. So a vanity hostname that merely resolves to 127.0.0.1 is hard-blocked with no
+  way to repair it. Only the literal strings "localhost" and "127.0.0.1" work here.
+-->
+</body>
+</html>
