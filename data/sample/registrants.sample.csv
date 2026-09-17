@@ -1,0 +1,6 @@
+Member Status,First Name,Last Name,Email,Title,State (text only),Related Record Owner,Account Owner,Phone,Zip/Postal Code,City,Country (text only),Company,Member Type,Register Type,Badge location,Propulse ID,Content QR Inhalt,QR Code Path,Attented,Full Name
+Registered,Norman,Wang,norman@customerdomain.com,Global Support Engineer,,Insight Web Portal Integration User,Rohan Wagh,PHONENUMBER,,,Canada,Linxdeep Information Technology Inc,Contact,,B-12,1,1,,#N/A,Norman Wang
+Registered,Maria,Santos,maria@example.com,"Director, Operations",,Insight Web Portal Integration User,Eileen Example,PHONENUMBER,,,Brazil,"Santos Logistica, S.A.",Contact,,A-04,2,2,,#N/A,Maria Santos
+Registered,Jonas,Öberg,jonas@example.se,VP Supply Chain,,Insight Web Portal Integration User,Tobias Krauss,PHONENUMBER,,,Sweden,Öberg & Söner AB,Contact,,C-21,3,3,,#N/A,Jonas Öberg
+Registered,Wei,Zhang,wei@example.cn,Warehouse Manager,,Insight Web Portal Integration User,Rohan Wagh,PHONENUMBER,,,China,Zhang Industrial Co,Contact,,B-13,4,4,,#N/A,Wei Zhang
+Cancelled,Ghost,Guest,ghost@example.com,Should Be Skipped,,Insight Web Portal Integration User,Nobody,PHONENUMBER,,,Germany,Nowhere GmbH,Contact,,,999,999,,#N/A,Ghost Guest

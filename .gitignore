@@ -8,7 +8,9 @@
 # Anything dropped in data/ is ignored by default. The ONLY files that may be
 # committed from data/ are explicitly re-included at the bottom.
 # ---------------------------------------------------------------------------
-data/
+# NOTE: "data/*" not "data/" - git cannot re-include a file whose parent
+# directory is excluded, and we need the synthetic sample at the bottom.
+data/*
 *.xlsx
 *.xlsm
 *.xls
@@ -38,6 +40,8 @@ Thumbs.db
 .aws-sam/
 cdk.out/
 
-# Re-includes: safe, synthetic sample data only.
+# Re-includes: synthetic sample data only. Must come last (last match wins),
+# and each level of the path has to be un-excluded in order.
 !data/sample/
-!data/sample/*.csv
+data/sample/*
+!data/sample/registrants.sample.csv
