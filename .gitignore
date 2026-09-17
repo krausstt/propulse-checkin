@@ -1,0 +1,43 @@
+# ---------------------------------------------------------------------------
+# PII FIREWALL - do not relax these without thinking very hard.
+#
+# The ProPulse registrant export contains real customer names, e-mail addresses
+# and phone numbers. None of it may ever enter git history, because git history
+# is forever and this repo may become public or be shared with the event team.
+#
+# Anything dropped in data/ is ignored by default. The ONLY files that may be
+# committed from data/ are explicitly re-included at the bottom.
+# ---------------------------------------------------------------------------
+data/
+*.xlsx
+*.xlsm
+*.xls
+*.csv
+*.tsv
+
+# The generated roster still contains visitor names - it is a deploy artefact,
+# not source. It gets uploaded to the backend, never committed.
+roster.json
+roster.*.json
+
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+aws-credentials*
+device-tokens*.json
+
+# Tooling
+node_modules/
+dist/
+.DS_Store
+Thumbs.db
+*.log
+.aws-sam/
+cdk.out/
+
+# Re-includes: safe, synthetic sample data only.
+!data/sample/
+!data/sample/*.csv

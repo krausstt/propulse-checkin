@@ -1,0 +1,14 @@
+{
+  "name": "propulse-checkin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "ProPulse 2026 Chicago - visitor check-in web app driving a ProGlove MAI display over the INSIGHT Mobile WebSocket.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test web/src/*.test.js",
+    "roster": "node tools/build-roster.mjs"
+  }
+}
