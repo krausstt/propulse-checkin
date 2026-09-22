@@ -1,0 +1,19 @@
+{
+  "name": "ProPulse 2026 Chicago Check-in",
+  "short_name": "ProPulse",
+  "description": "Greets trade-fair visitors by name on a ProGlove MAI display.",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#12141a",
+  "theme_color": "#12141a",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

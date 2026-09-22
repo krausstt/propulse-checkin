@@ -1,0 +1,353 @@
+/**
+ * app.js - wiring. The only file that touches the DOM.
+ *
+ * Scan path, end to end:
+ *   ProGlove scanner -> INSIGHT Mobile -> ws://localhost:9998 -> ScannerLink
+ *     -> parseScannedId -> roster lookup -> buildDisplayCommand
+ *     -> ScannerLink.sendDisplay -> INSIGHT Mobile -> BLE -> MAI screen
+ *   and in parallel: createCheckin -> IndexedDB -> sync queue
+ *
+ * The greeting and the check-in are deliberately independent. The greeting is
+ * worthless a second later, so it is fire-and-forget. The check-in is
+ * attendance data, so it is written to disk before anything else and retried
+ * until it lands.
+ */
+
+import { buildDisplayCommand, parseScannedId } from './src/mai.js';
+import { ScannerLink } from './src/ws.js';
+import { indexVisitors, lookup, validateRoster, acceptReplacement } from './src/roster.js';
+import {
+  createCheckin, isDuplicateScan, dueForSend, markSent, markFailed, outboxStats,
+} from './src/outbox.js';
+import { openDb, loadRoster, saveRoster, putCheckin, putCheckins, allCheckins, requestPersistence } from './src/idb.js';
+
+const $ = id => document.getElementById(id);
+
+/**
+ * Where check-ins go. Empty means "nowhere yet": the AWS Lambda Function URL
+ * does not exist, so the app is honest about it rather than pretending a
+ * DynamoDB write happened. Set this (or ?api=... once) and the same outbox
+ * that already works starts draining to the real backend with no other change.
+ */
+const API_BASE = new URLSearchParams(location.search).get('api')
+  || localStorage.getItem('apiBase')
+  || '';
+if (new URLSearchParams(location.search).get('api')) {
+  localStorage.setItem('apiBase', new URLSearchParams(location.search).get('api'));
+}
+
+/** One stable id per phone, so five SureMDM devices are distinguishable in the
+ *  check-in log without anybody provisioning a config file per device. */
+function deviceId() {
+  let v = localStorage.getItem('deviceId');
+  if (!v) { v = `dev-${crypto.randomUUID().slice(0, 8)}`; localStorage.setItem('deviceId', v); }
+  return v;
+}
+
+const state = {
+  index: new Map(),
+  rosterMeta: null,
+  checkins: [],
+  template: localStorage.getItem('template') || 'pg_work5_t3',
+  syncing: false,
+};
+
+// --- logging -------------------------------------------------------------
+
+const t0 = performance.now();
+function log(msg, level = 'info') {
+  const el = document.createElement('div');
+  el.className = `l-${level}`;
+  el.textContent = `${String(Math.round(performance.now() - t0)).padStart(6)}ms  ${msg}`;
+  $('log').appendChild(el);
+  while ($('log').childElementCount > 400) $('log').firstElementChild.remove();
+  $('log').scrollTop = $('log').scrollHeight;
+}
+
+// --- the link ------------------------------------------------------------
+
+const link = new ScannerLink();
+
+link.on('log', l => log(l.msg, l.level === 'ok' ? 'ok' : l.level));
+
+link.on('status', s => {
+  $('dot').className = s.state;
+  const text = {
+    idle: 'Not connected', connecting: 'Connecting…', open: 'Scanner connected',
+    backoff: 'Reconnecting…', 'needs-tap': 'Tap to connect',
+  }[s.state] ?? s.state;
+  $('linkText').textContent = text;
+  $('linkDetail').textContent = s.detail
+    || (s.serials.device_serial ? `MAI ${s.serials.device_serial}` : 'waiting for the first scan to learn the MAI serial');
+  $('bConnect').hidden = s.state === 'open' || s.state === 'connecting';
+  $('bDisconnect').hidden = !$('bConnect').hidden;
+  $('bConnect').textContent = s.everConnected ? 'Reconnect scanner' : 'Connect scanner';
+});
+
+link.on('scan', frame => { onScan(frame).catch(e => log(`scan handling failed: ${e.message}`, 'error')); });
+
+// --- the scan path -------------------------------------------------------
+
+async function onScan(frame) {
+  const raw = frame.code;
+  const id = parseScannedId(raw);
+
+  if (id === null) {
+    // A product EAN, a poster QR, someone's train ticket. Say so rather than
+    // flashing NOT REGISTERED, which would send a greeter chasing a visitor
+    // who never scanned a badge.
+    log(`ignored non-badge scan ${JSON.stringify(raw)}`, 'warn');
+    showGreeting({ kind: 'ignored', raw });
+    return;
+  }
+
+  const visitor = lookup(state.index, id);
+  const now = Date.now();
+
+  // 1. The screen. Fire and forget - a greeting is worthless a second later.
+  if (link.serials.device_serial) {
+    link.sendDisplay(buildDisplayCommand({
+      id,
+      visitor,
+      deviceSerial: link.serials.device_serial,
+      gatewaySerial: link.serials.gateway_serial,
+      eventId: crypto.randomUUID(),
+      now,
+      template: state.template,
+    }));
+  } else {
+    log('no device_serial learned yet - cannot address the MAI', 'warn');
+  }
+
+  // 2. The check-in. Disk first, network later, never the other way round.
+  if (isDuplicateScan(state.checkins, id, now)) {
+    log(`duplicate scan of ${id} inside the dedupe window - not recorded twice`, 'dim');
+  } else {
+    const record = createCheckin({ id, uuid: crypto.randomUUID(), deviceId: deviceId(), now, matched: Boolean(visitor) });
+    await putCheckin(record);
+    state.checkins.push(record);
+    log(`check-in recorded ${record.idempotency_key} (${visitor ? 'matched' : 'UNMATCHED'})`, visitor ? 'ok' : 'warn');
+  }
+
+  showGreeting({ kind: visitor ? 'hit' : 'miss', id, visitor });
+  renderSync();
+  sync('after scan');
+}
+
+function showGreeting(g) {
+  const el = $('greet');
+  if (g.kind === 'ignored') {
+    el.innerHTML = `<div id="gEmpty">Not a badge code</div>
+      <div id="gMeta">scanned: ${escapeHtml(String(g.raw).slice(0, 60))}</div>
+      <div id="gBadge" class="b-idle">IGNORED</div>`;
+    return;
+  }
+  if (g.kind === 'miss') {
+    el.innerHTML = `<div id="gName">ID ${escapeHtml(g.id)}</div>
+      <div id="gMeta">Not on the roster. Walk the guest to the desk.</div>
+      <div id="gBadge" class="b-miss">NOT REGISTERED</div>`;
+    return;
+  }
+  const v = g.visitor;
+  el.innerHTML = `<div id="gName">${escapeHtml(v.full_name)}</div>
+    <div id="gMeta">${escapeHtml(v.company || '—')} · host ${escapeHtml(v.host || '—')} · badge ${escapeHtml(v.badge_location || '—')}</div>
+    <div id="gBadge" class="b-ok">CHECKED IN · ID ${escapeHtml(g.id)}</div>`;
+}
+
+const escapeHtml = s => String(s).replace(/[&<>"']/g, c =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+// --- check-in sync -------------------------------------------------------
+
+function renderSync() {
+  const s = outboxStats(state.checkins, Date.now());
+  $('nTotal').textContent = s.pending + s.sent;
+  $('nSynced').textContent = s.sent;
+  $('nPending').textContent = s.pending;
+  $('pPending').classList.toggle('warn', s.pending > 0);
+  $('bSync').textContent = API_BASE
+    ? (s.pending ? `Sync ${s.pending} now` : 'All synced')
+    : 'No server configured — held on device';
+}
+
+/**
+ * Drain the outbox.
+ *
+ * With no API_BASE this is deliberately a no-op that says so. The alternative
+ * is a green "synced" tick that means nothing, which is exactly the kind of
+ * reassurance that gets discovered as false on the evening of day one.
+ */
+async function sync(reason) {
+  if (!API_BASE || state.syncing) return;
+  const batch = dueForSend(state.checkins, Date.now());
+  if (!batch.length) return;
+
+  state.syncing = true;
+  try {
+    log(`syncing ${batch.length} check-in(s) (${reason})`);
+    const res = await fetch(`${API_BASE.replace(/\/$/, '')}/checkins`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ device_id: deviceId(), checkins: batch }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const body = await res.json().catch(() => ({}));
+    // Trust the server's list if it sends one, otherwise assume the batch we
+    // sent. Either way the idempotency key means a replay is harmless.
+    const accepted = new Set(Array.isArray(body.accepted) ? body.accepted : batch.map(r => r.idempotency_key));
+    const now = Date.now();
+    const updated = state.checkins.map(r => (accepted.has(r.idempotency_key) && r.status !== 'sent' ? markSent(r, now) : r));
+    await putCheckins(updated.filter(r => accepted.has(r.idempotency_key)));
+    state.checkins = updated;
+    log(`synced ${accepted.size} check-in(s)`, 'ok');
+  } catch (e) {
+    const now = Date.now();
+    const keys = new Set(batch.map(r => r.idempotency_key));
+    state.checkins = state.checkins.map(r => (keys.has(r.idempotency_key) ? markFailed(r, { now, error: e.message }) : r));
+    await putCheckins(state.checkins.filter(r => keys.has(r.idempotency_key)));
+    log(`sync failed: ${e.message} - check-ins stay on the device and retry`, 'error');
+  } finally {
+    state.syncing = false;
+    renderSync();
+  }
+}
+
+// --- roster --------------------------------------------------------------
+
+async function installRoster(payload, meta, source) {
+  const errors = validateRoster(payload);
+  if (errors.length) { log(`roster rejected: ${errors.join('; ')}`, 'error'); return false; }
+
+  const { index, collisions, unusable } = indexVisitors(payload);
+  state.index = index;
+  state.rosterMeta = { ...meta, count: index.size, source, event: payload.event };
+  for (const c of collisions) log(`ID collision after normalising: ${JSON.stringify(c.raw)} both map to ${c.id}`, 'error');
+  for (const u of unusable) log(`roster key ${JSON.stringify(u)} is not badge-shaped and can never be scanned`, 'warn');
+
+  $('rosterText').innerHTML =
+    `<b>${index.size}</b> visitors · ${escapeHtml(source)}` +
+    (collisions.length ? ` · <span style="color:var(--bad)">${collisions.length} ID collision(s)</span>` : '') +
+    `<br><span style="color:var(--dim);font-size:12px">${escapeHtml(payload.event || '')} · built ${escapeHtml((payload.generated_at || '').slice(0, 16))}</span>`;
+  return true;
+}
+
+async function bootRoster() {
+  const cached = await loadRoster().catch(() => null);
+  if (cached && validateRoster(cached).length === 0) {
+    await installRoster(cached, cached, `cached on device`);
+    return;
+  }
+  // The bundled roster is the SYNTHETIC sample and nothing else. GitHub Pages
+  // serves a public site even from a private repo, so the real registrant data
+  // can never live here - it is loaded from the phone with "Load roster file".
+  try {
+    const res = await fetch('demo-roster.sample.json', { cache: 'no-cache' });
+    const payload = await res.json();
+    if (await installRoster(payload, { fetched_at: new Date().toISOString() }, 'bundled sample (synthetic)')) {
+      await saveRoster(payload, { fetched_at: new Date().toISOString() });
+    }
+  } catch (e) {
+    $('rosterText').textContent = `no roster: ${e.message}`;
+    log(`roster load failed: ${e.message}`, 'error');
+  }
+}
+
+$('fRoster').onchange = async ev => {
+  const file = ev.target.files?.[0];
+  if (!file) return;
+  try {
+    const payload = JSON.parse(await file.text());
+    const decision = acceptReplacement(state.rosterMeta, payload);
+    if (!decision.accept && decision.errors.length) {
+      log(`roster file rejected: ${decision.errors.join('; ')}`, 'error');
+      return;
+    }
+    const meta = { fetched_at: new Date().toISOString() };
+    if (await installRoster(payload, meta, `file: ${file.name}`)) {
+      await saveRoster(payload, meta);
+      log(`roster replaced from ${file.name}`, 'ok');
+    }
+  } catch (e) {
+    log(`could not read roster file: ${e.message}`, 'error');
+  } finally {
+    ev.target.value = '';
+  }
+};
+
+// --- controls ------------------------------------------------------------
+
+$('bConnect').onclick = () => link.connectFromUserGesture();
+$('bDisconnect').onclick = () => link.disconnect();
+$('bSync').onclick = () => sync('manual');
+$('bLoad').onclick = () => $('fRoster').click();
+$('bClear').onclick = () => { $('log').textContent = ''; };
+$('bCopy').onclick = async () => {
+  try { await navigator.clipboard.writeText(`${$('env').textContent}\n\n${$('log').innerText}`); log('log copied', 'ok'); }
+  catch { log('clipboard blocked - long-press the log and copy by hand', 'warn'); }
+};
+
+$('tpl').value = state.template;
+$('tpl').onchange = e => {
+  state.template = e.target.value;
+  localStorage.setItem('template', state.template);
+  log(`template -> ${state.template}`, 'dim');
+};
+
+/** Exercises the whole path except the socket: lookup, greeting, check-in,
+ *  outbox. Lets the flow be validated on a desk with no scanner in reach. */
+$('bSim').onclick = () => {
+  const ids = [...state.index.keys()];
+  if (!ids.length) { log('no roster loaded', 'warn'); return; }
+  const id = ids[Math.floor(Math.random() * ids.length)];
+  log(`simulating a scan of ${id}`, 'dim');
+  onScan({ code: id }).catch(e => log(e.message, 'error'));
+};
+
+// --- lifecycle -----------------------------------------------------------
+
+// Timestamps, not timer ticks: a backgrounded Android tab has its timers frozen
+// and its socket silently killed, so every route back into the foreground has
+// to re-check by wall clock.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') { link.resume('visibilitychange'); sync('resume'); }
+});
+window.addEventListener('pageshow', () => link.resume('pageshow'));
+window.addEventListener('online', () => { link.resume('online'); sync('online'); });
+
+window.onerror = (m, s, l, c, e) => log(`window.onerror: ${m} ${e?.stack ?? ''}`, 'error');
+window.onunhandledrejection = e => log(`unhandled rejection: ${e.reason}`, 'error');
+
+(async function boot() {
+  const standalone = matchMedia('(display-mode: standalone)').matches;
+  $('env').textContent = [
+    `origin    ${location.origin}`,
+    `secure    ${window.isSecureContext}`,
+    `display   ${standalone ? 'installed PWA' : 'browser tab'}`,
+    `device    ${deviceId()}`,
+    `api       ${API_BASE || '(none - check-ins stay on this device)'}`,
+    `UA        ${navigator.userAgent}`,
+  ].join('\n');
+  log(`boot · ${standalone ? 'installed PWA' : 'browser tab'} · secureContext=${window.isSecureContext}`, 'dim');
+
+  try {
+    await openDb();
+    const p = await requestPersistence();
+    log(`storage persistence: ${p.supported ? p.persisted : 'unsupported'}`, p.persisted ? 'ok' : 'warn');
+  } catch (e) {
+    log(`IndexedDB unavailable: ${e.message} - check-ins cannot survive a reload`, 'error');
+  }
+
+  await bootRoster();
+  state.checkins = await allCheckins().catch(() => []);
+  renderSync();
+  link._setState('needs-tap', 'tap to connect');
+
+  // The socket lives in the foreground document. The service worker only ever
+  // caches the shell: local network requests from a service worker fail by
+  // specification, so it must never be anywhere near ws://localhost.
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js')
+      .then(() => log('service worker registered (shell cache only)', 'dim'))
+      .catch(e => log(`service worker failed: ${e.message}`, 'warn'));
+  }
+})();

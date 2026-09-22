@@ -31,11 +31,18 @@ is re-included. Uses `data/*` not `data/` deliberately — git cannot re-include
 file whose parent directory is excluded. **Verify with `git check-ignore -v`
 after touching it.** A name in git history is permanent.
 
-### 3. Only four fields ever leave the laptop
+### 3. Only the fields the template displays ever leave the laptop
 
-`propulse_id`, `full_name`, `host`, `badge_location`. E-mail, phone, address,
-company and title are read by the roster builder and dropped. The MAI template
-has exactly four cells, so nothing else is needed. Do not "helpfully" add fields.
+Currently FIVE: `propulse_id`, `full_name`, `host`, `badge_location`, `company`.
+E-mail, phone, address and title are read by the roster builder and dropped.
+
+This was four until the `pg_work5_t3` capture arrived (2026-09-22). That
+template has a fifth cell showing the visitor's employer, so `company` now has
+to travel from the sheet to the phone. The rule is unchanged in spirit: a field
+crosses the line only when a template cell demands it, never because it is
+convenient. If the booth returns to `pg_work4_t4`, drop `company` again.
+
+Still absolutely not: e-mail, phone, address, title.
 
 ---
 
@@ -61,6 +68,19 @@ has exactly four cells, so nothing else is needed. Do not "helpfully" add fields
   recovery. One technician provisions each phone; booth staff must never meet
   that prompt cold.
 - Last year's Lovable app is **void as evidence** — it predates Chrome 147.
+
+### Partially answered since (2026-09-22, low-grade evidence)
+
+A Google-owned repo states WebSocket connections to a local address "start
+triggering permission **prompts**", which suggests prompt rather than hard-fail.
+But `developer.chrome.com`, `chromestatus.com`, `wicg.github.io` and
+`chromeenterprise.google` are ALL blocked by the cloud session's egress proxy,
+so no primary source could be read and nothing Android-specific was found.
+Treat as a lead. Also unverified: the WICG spec seems to split the permission
+name by address space (`loopback-network` for 127.0.0.1, `local-network` for
+private ranges), and a separate `LoopbackNetworkAccessAllowedForUrls` policy may
+exist alongside `LocalNetworkAccessAllowedForUrls`. `LocalNetworkAccess
+RestrictionsTemporaryOptOut` is removed in Chrome 156, so it is not a plan.
 
 ### Unresolved, and gating
 
@@ -103,16 +123,28 @@ Venue WiFi must never be a hard dependency of the greeting.
 
 ## Ground truth
 
-`web/src/mai.test.js` holds a captured `display_v2!` payload from the customer's
-own INSIGHT Mobile install, asserted by deep-equal. **That capture is the spec.**
-If a change breaks that test, the change is wrong.
+`web/src/mai.test.js` holds TWO captured `display_v2!` payloads from the
+customer's own INSIGHT Mobile install, each asserted by deep-equal. **Those
+captures are the spec.** If a change breaks either test, the change is wrong.
 
-- Template `pg_work4_t4`: `field_top_left`, `field_top_right`,
-  `field_middle_left`, `field_bottom`, plus optional `title`. There is **no**
-  `field_middle_right`.
+- Template `pg_work4_t4`: `field_top_left` (ID), `field_top_right` (Host),
+  `field_middle_left` (Badge Location), `field_bottom` (Full Name, highlighted),
+  plus `title`. No `field_middle_right`. Carries `forced_orientation`.
+- Template `pg_work5_t3`: `field_top_left` (ID), `field_top_right` (Badge
+  Location), `field_middle_left` (Host), `field_middle_right` (**Company**,
+  highlighted), `field_bottom` (Full Name, not highlighted), plus `title`.
+  Carries **no** `forced_orientation` key at all.
+
+These two are not old and new. They are two templates that both exist, they
+order their cells differently, and they put the highlight on different cells.
+`pg_work5_t3` is the app default. Do not collapse them or normalise one to the
+other without a capture that proves they are the same thing.
 - Badge QR content is a bare integer, e.g. `1`. Confirmed by Tobias. Marketing
   print it; it is not changeable.
-- `forced_orientation: "LANDSCAPE"` is correct for this template.
+- `forced_orientation: "LANDSCAPE"` is correct for `pg_work4_t4` and is absent
+  from the `pg_work5_t3` capture. Do not add it there "for consistency": a key
+  the device has never been observed to receive is how a working template turns
+  into an unexplained rejection at the booth.
 - INSIGHT Mobile's command queue is only **5 deep** — debounce display sends.
 
 ---
@@ -121,6 +153,10 @@ If a change breaks that test, the change is wrong.
 
 ```bash
 npm test                                             # node:test, no deps
+npm run e2e                                          # real Chromium vs. the mock server
+npm run mock                                         # stand-in for INSIGHT Mobile
+npm run serve                                        # static server for web/ (plain HTTP)
+npm run demo-roster                                  # rebuild the synthetic bundled roster
 node tools/build-roster.mjs <in.csv> --out roster.json --strict
 node tools/build-roster.mjs data/sample/registrants.sample.csv --sample
 ```
