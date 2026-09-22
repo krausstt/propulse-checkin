@@ -16,10 +16,13 @@ badge QR ("1")  →  ProGlove scanner  →  INSIGHT Mobile  →  ws://localhost:
 | | |
 |---|---|
 | Roster pipeline | ✅ built, tested |
-| MAI command builder | ✅ built, 8/8 tests green against a captured payload |
+| MAI command builder | ✅ built, tested against a captured payload |
+| Roster cache + check-in outbox | ✅ built, tested (pure logic; IndexedDB binding in `idb.js`) |
 | On-device LNA diagnostic | ✅ built — **not yet run on hardware** |
-| PWA + WebSocket manager | ⬜ blocked on the diagnostic |
+| PWA shell + WebSocket manager | ⬜ blocked on the diagnostic |
 | AWS SAM backend | ⬜ not started |
+
+37/37 tests green (`npm test`).
 
 ## Quickstart
 
