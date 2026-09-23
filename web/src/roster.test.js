@@ -14,7 +14,7 @@ const payload = () => ({
   count: 3,
   checksum: 'deadbeefdeadbeef',
   visitors: {
-    1: { full_name: 'Norman Wang', host: 'Rohan Wagh', badge_location: 'B-12', status: 'Registered' },
+    1: { full_name: 'Nolan Wong', host: 'Rohan Wagh', badge_location: 'B-12', status: 'Registered' },
     2: { full_name: 'Maria Santos', host: 'Eileen Example', badge_location: 'A-04', status: 'Registered' },
     3: { full_name: 'Jonas Öberg', host: 'Tobias Krauss', badge_location: 'C-21', status: 'Registered' },
   },
@@ -150,4 +150,24 @@ test('a genuinely newer roster is accepted', () => {
   incoming.count = 4;
   incoming.checksum = 'newchecksum00000';
   assert.equal(acceptReplacement(current, incoming).accept, true);
+});
+
+test('a roster carrying e-mail or phone is refused on the phone', () => {
+  // The file is carried to the phones by hand. If someone picks the wrong one,
+  // the phone is the last place to stop it.
+  const p = payload();
+  p.visitors[1] = { ...p.visitors[1], email: 'x@example.com', phone: '+1 555 0100' };
+  const errors = validateRoster(p);
+  const msg = errors.find(e => /refusing roster/.test(e));
+  assert.ok(msg, errors.join('; '));
+  assert.match(msg, /email/);
+  assert.match(msg, /phone/);
+  assert.doesNotMatch(msg, /x@example\.com|555/, 'the error names keys, never values');
+});
+
+test('every field the builder emits is allowed', () => {
+  assert.deepEqual(validateRoster(payload()), []);
+  const p = payload();
+  p.visitors[1].company = 'Anonymized Information Technology Inc';
+  assert.deepEqual(validateRoster(p), []);
 });

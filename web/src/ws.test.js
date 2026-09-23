@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  ScannerLink, backoffDelay, mayAutoConnect,
+  ScannerLink, backoffDelay, mayAutoConnect, redactDisplayText,
   BACKOFF, AUTO_ATTEMPT_LIMIT, ZOMBIE_GAP_MS, SEND_INTERVAL_MS,
 } from './ws.js';
 
@@ -268,4 +268,21 @@ test('disconnecting is sticky until the next tap', () => {
 
   link.connectFromUserGesture();
   assert.equal(sockets.length, 2);
+});
+
+test('an error frame echoing a display command never puts the name in the log', () => {
+  const { link, sockets } = harness();
+  const logs = [];
+  link.on('log', l => logs.push(l.msg));
+  link.connectFromUserGesture();
+  sockets[0]._open();
+  sockets[0]._message(JSON.stringify({
+    event_type: 'errors',
+    errors: [{ message: 'bad cell', command: { field_bottom: { text_header: 'Full Name of Visitor', text_content: 'Nolan Wong' } } }],
+  }));
+  const line = logs.find(m => /reported errors/.test(m));
+  assert.ok(line);
+  assert.doesNotMatch(line, /Nolan/);
+  assert.match(line, /Full Name of Visitor/, 'the header survives, so the error is still readable');
+  assert.equal(redactDisplayText({ title: 'x', text_content: 'y' }), '{"title":"[redacted]","text_content":"[redacted]"}');
 });

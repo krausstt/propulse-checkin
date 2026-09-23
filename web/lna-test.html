@@ -246,7 +246,7 @@ function send(obj, label) {
 }
 
 document.getElementById('bDisplay').onclick = () =>
-  send(displayCommand({ id: '1', name: 'Norman Wang', host: 'Rohan', badge: 'B-12' }), 'display_v2! (normal)');
+  send(displayCommand({ id: '1', name: 'Nolan Wong', host: 'Rohan', badge: 'B-12' }), 'display_v2! (normal)');
 
 document.getElementById('bLong').onclick = () =>
   send(displayCommand({
@@ -267,7 +267,7 @@ document.getElementById('bBad').onclick = () => {
 // command queue. Run this only AFTER B2 has passed, so that a failure here is
 // unambiguously about ack_required and not about the payload as a whole.
 document.getElementById('bAck').onclick = () => {
-  const cmd = displayCommand({ id: '1', name: 'Norman Wang', host: 'Rohan', badge: 'B-12' });
+  const cmd = displayCommand({ id: '1', name: 'Nolan Wong', host: 'Rohan', badge: 'B-12' });
   cmd.ack_required = 'ON_HANDLED';
   log('B5 adds a key that is NOT in the captured payload - a rejection here is expected-ish.', 'warn');
   send(cmd, 'display_v2! + ack_required:ON_HANDLED');

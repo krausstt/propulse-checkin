@@ -23,9 +23,9 @@ badge QR ("1")  →  ProGlove scanner  →  INSIGHT Mobile  →  ws://localhost:
 | Mock INSIGHT Mobile server | ✅ `npm run mock` |
 | End-to-end test in real Chromium | ✅ `npm run e2e` |
 | On-device LNA diagnostic | ✅ built — **not yet run on hardware** |
-| AWS backend | ⬜ not started — check-ins stay on the device |
+| Backend | none by decision (AWS dropped): roster by hand, check-ins stay on the device |
 
-74 unit tests + 25 end-to-end checks green.
+77 unit tests + 25 end-to-end checks green, plus `npm run check-public`.
 
 ## Try it in two minutes, no phone, no scanner
 
@@ -68,14 +68,14 @@ will really run on. For the socket, deploy to HTTPS:
 
 ## What "checked in" means right now
 
-There is no backend yet, and the app does not pretend otherwise. A scan writes
+There is no backend (AWS was dropped by decision), and the app does not pretend otherwise. A scan writes
 an immutable check-in to IndexedDB with a client-generated idempotency key, and
 the counter shows **Recorded / Synced / Unsynced**. With no server configured
 the button reads *"No server configured — held on device"*, and Unsynced stays
 at the full count. That is the honest state.
 
-Point it at a backend and the same outbox starts draining, with no other
-change: open the app once with `?api=https://your-endpoint` (it is remembered),
+The sync path is kept dormant rather than deleted. Check-ins carry no name, so
+if a backend is ever added, it only ever sees badge IDs and timestamps: open the app once with `?api=https://your-endpoint` (it is remembered),
 and it POSTs batches to `POST {api}/checkins`, expecting `{"accepted": [...]}`
 of idempotency keys back.
 
@@ -106,6 +106,10 @@ buttons.
 See [CLAUDE.md](CLAUDE.md) for the full constraint set and the open questions.
 
 ## Handling registrant data
+
+**This repository and its Pages site are public.** Read `docs/data-flow.md`
+before touching anything that involves visitor data, and run
+`npm run check-public` before every push.
 
 The registrant export contains real customer names, e-mail addresses and phone
 numbers. It never enters this repo.

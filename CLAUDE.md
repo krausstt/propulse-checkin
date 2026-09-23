@@ -95,6 +95,11 @@ treat the answers as unknown and do not design around a guess:
 5. Does the `scan` event really carry `device_serial` **and** `gateway_serial`?
    (If yes, nothing is hardcoded per phone — that is the intended design.)
 
+**Open question for the ProGlove team:** does INSIGHT Mobile forward Streams
+API traffic, or logs containing it, to any ProGlove cloud (INSIGHT web portal,
+telemetry)? Every `display_v2!` carries a visitor's name and company. If
+INSIGHT Mobile uploads it, names leave the phone through our own product.
+
 **Open question for the ProGlove team:** does INSIGHT Mobile support **MQTT**?
 If it does, the loopback problem disappears entirely — phone ↔ AWS IoT Core ↔
 web app over WSS, no LNA at all. Costs offline capability, so it is the fallback,
@@ -106,18 +111,32 @@ not the default. This is the contingency if test 1 comes back "hard fail".
 
 | Layer | Choice |
 |---|---|
-| App | Buildless PWA — plain ES modules, no bundler, no framework |
-| Hosting | GitHub Pages on a ProGlove **custom subdomain** (pins one origin for permission policy; `*.github.io` is shared and would over-grant) |
-| Backend | AWS SAM → 1× Lambda Function URL + 1× DynamoDB table, `eu-central-1` |
-| Roster | Served by the Lambda behind an event key, cached in IndexedDB |
-| Check-ins | Append-only, client-generated UUID idempotency key, local outbox flushed on reconnect |
+| App | Buildless PWA, plain ES modules, no bundler, no framework |
+| Hosting | GitHub Pages, **code only**. Custom ProGlove subdomain before the phones are provisioned (the LNA grant is per origin; `*.github.io` grants are void after a move) |
+| Backend | **None.** AWS (Lambda + DynamoDB) was dropped on 2026-09-23 |
+| Roster | Built on the laptop by `build-roster.mjs`, carried to each phone **by hand** via company OneDrive/Teams, loaded with *Load roster file*, held in IndexedDB |
+| Check-ins | Append-only on the phone, client-generated UUID idempotency key. They carry **no name**: `{idempotency_key, propulse_id, device_id, scanned_at, matched}`. Held on device; the sync path is dormant unless `?api=` is set |
 
-**A GitHub Pages site is public even from a private repo** (private sites need
-Enterprise Cloud). So Pages carries **code only** — never the roster.
+**This repo and its Pages site are public.** Nothing with a real name may be
+committed or published, ever. Two gates enforce it and neither may be relaxed:
 
-"Single source of truth" means DynamoDB is the only *writer of record*. The
-IndexedDB roster cache is a versioned read replica, not a per-device export.
-Venue WiFi must never be a hard dependency of the greeting.
+1. `.gitignore` stops real files **by name** (every CSV/XLSX, `roster.json`).
+2. `tools/check-public.mjs` checks **content** of every tracked file (e-mail
+   domains, phone-shaped strings, a denylist of known real strings, stray
+   rosters, forbidden roster fields). CI runs it before every deploy. Run it
+   yourself before every push: `npm run check-public`.
+
+The raw SharePoint export never leaves the laptop. What travels to the phones
+is the **reduced** `roster.json`, never the CSV: the phone app refuses `.csv`
+files and refuses any roster whose records carry a key outside
+`ALLOWED_FIELDS` in `web/src/roster.js`.
+
+The sample data is **pseudonymised, not merely synthetic**: row 1 was derived
+from a real record. Its name and company were replaced on 2026-09-23. The
+original strings survive in git history before that date (see the denylist in
+`check-public.mjs`). Never "restore realism" to the sample from a real export.
+
+See `docs/data-flow.md` for the full path and every place a name exists.
 
 ---
 
@@ -157,6 +176,7 @@ npm run e2e                                          # real Chromium vs. the moc
 npm run mock                                         # stand-in for INSIGHT Mobile
 npm run serve                                        # static server for web/ (plain HTTP)
 npm run demo-roster                                  # rebuild the synthetic bundled roster
+npm run check-public                                 # content gate: run before every push
 node tools/build-roster.mjs <in.csv> --out roster.json --strict
 node tools/build-roster.mjs data/sample/registrants.sample.csv --sample
 ```

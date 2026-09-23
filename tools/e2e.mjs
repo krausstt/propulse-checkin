@@ -101,10 +101,10 @@ try {
 
   console.log('\nSCAN a known badge');
   sendScan('1');
-  await until('greeting rendered', async () => (await page.textContent('#gName')) === 'Norman Wang');
+  await until('greeting rendered', async () => (await page.textContent('#gName')) === 'Nolan Wong');
   check('greets the visitor by name', true);
   const meta = await page.textContent('#gMeta');
-  check('shows company, host and badge location', /Linxdeep/.test(meta) && /Rohan/.test(meta) && /B-12/.test(meta), meta);
+  check('shows company, host and badge location', /Anonymized Information/.test(meta) && /Rohan/.test(meta) && /B-12/.test(meta), meta);
   check('badge says CHECKED IN', /CHECKED IN/.test(await page.textContent('#gBadge')));
 
   await until('display received', () => mockOut.includes('display_v2!'));
@@ -113,7 +113,7 @@ try {
   check('pg_work5_t3 sends no forced_orientation', /forced_orientation=\(absent\)/.test(mockOut));
   check('device_serial was learned from the scan, not hardcoded', /device=MAIXBEU011089/.test(mockOut));
   check('Company cell is the highlighted one', /field_middle_right.*HIGHLIGHTED/.test(mockOut));
-  check('full name is in field_bottom', /field_bottom\s+Full Name of Visitor\s+Norman Wang/.test(mockOut));
+  check('full name is in field_bottom', /field_bottom\s+Full Name of Visitor\s+Nolan Wong/.test(mockOut));
 
   console.log('\nCHECK-IN');
   await until('counter moved', async () => (await page.textContent('#nTotal')) === '1');

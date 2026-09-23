@@ -23,7 +23,7 @@ const GOLDEN = {
         field_middle_left: { text_header: 'Badge Location', text_content: 'B-12', ref_id: 'field_middle_left_ref' },
         field_bottom: {
           text_header: 'Full Name of Visitor',
-          text_content: 'Norman Wang',
+          text_content: 'Nolan Wong',
           ref_id: 'field_bottom_ref',
           state: { type: 'FOCUSED', highlighted: true },
         },
@@ -33,7 +33,7 @@ const GOLDEN = {
   time_created: 1789659645191,
 };
 
-const NORMAN = { full_name: 'Norman Wang', host: 'Rohan Wagh', badge_location: 'B-12', status: 'Registered' };
+const NOLAN = { full_name: 'Nolan Wong', host: 'Rohan Wagh', badge_location: 'B-12', status: 'Registered' };
 
 const base = {
   deviceSerial: 'MAIXBEU011089',
@@ -43,7 +43,7 @@ const base = {
 };
 
 test('reproduces the captured known-good payload exactly', () => {
-  const out = buildDisplayCommand({ id: '1', visitor: NORMAN, ...base });
+  const out = buildDisplayCommand({ id: '1', visitor: NOLAN, ...base });
   assert.deepEqual(out, GOLDEN);
 });
 
@@ -92,7 +92,7 @@ test('formatHost takes the given name but can be told not to', () => {
 
 test('missing deviceSerial fails fast instead of sending a junk command', () => {
   assert.throws(
-    () => buildDisplayCommand({ id: '1', visitor: NORMAN, ...base, deviceSerial: undefined }),
+    () => buildDisplayCommand({ id: '1', visitor: NOLAN, ...base, deviceSerial: undefined }),
     /deviceSerial missing/
   );
 });
@@ -147,7 +147,7 @@ const GOLDEN_T3 = {
         },
         field_bottom: {
           text_header: 'Full Name of Visitor',
-          text_content: 'Norman Wang',
+          text_content: 'Nolan Wong',
           ref_id: 'field_bottom_ref',
         },
       },
@@ -156,8 +156,8 @@ const GOLDEN_T3 = {
   time_created: 1790089547996,
 };
 
-const NORMAN_T3 = {
-  full_name: 'Norman Wang',
+const NOLAN_T3 = {
+  full_name: 'Nolan Wong',
   host: 'Rohan Wagh',
   badge_location: 'B-12',
   company: 'Anonymized Information Technology Inc',
@@ -173,26 +173,26 @@ const baseT3 = {
 };
 
 test('reproduces the captured pg_work5_t3 payload exactly', () => {
-  const out = buildDisplayCommand({ id: '1', visitor: NORMAN_T3, ...baseT3 });
+  const out = buildDisplayCommand({ id: '1', visitor: NOLAN_T3, ...baseT3 });
   assert.deepEqual(out, GOLDEN_T3);
 });
 
 test('pg_work5_t3 carries no forced_orientation, pg_work4_t4 does', () => {
   // Inventing a key the device has never been observed to receive is how a
   // working template becomes an unexplained rejection at the booth.
-  const t3 = buildDisplayCommand({ id: '1', visitor: NORMAN_T3, ...baseT3 });
+  const t3 = buildDisplayCommand({ id: '1', visitor: NOLAN_T3, ...baseT3 });
   assert.equal('forced_orientation' in t3, false);
 
-  const t4 = buildDisplayCommand({ id: '1', visitor: NORMAN_T3, ...baseT3, template: 'pg_work4_t4' });
+  const t4 = buildDisplayCommand({ id: '1', visitor: NOLAN_T3, ...baseT3, template: 'pg_work4_t4' });
   assert.equal(t4.forced_orientation, 'LANDSCAPE');
 });
 
 test('pg_work5_t3 highlights Company, pg_work4_t4 highlights the name', () => {
-  const t3 = buildDisplayCommand({ id: '1', visitor: NORMAN_T3, ...baseT3 }).screen_views[0].pg_work5_t3;
+  const t3 = buildDisplayCommand({ id: '1', visitor: NOLAN_T3, ...baseT3 }).screen_views[0].pg_work5_t3;
   assert.deepEqual(t3.field_middle_right.state, { type: 'FOCUSED', highlighted: true });
   assert.equal('state' in t3.field_bottom, false);
 
-  const t4 = buildDisplayCommand({ id: '1', visitor: NORMAN_T3, ...baseT3, template: 'pg_work4_t4' })
+  const t4 = buildDisplayCommand({ id: '1', visitor: NOLAN_T3, ...baseT3, template: 'pg_work4_t4' })
     .screen_views[0].pg_work4_t4;
   assert.deepEqual(t4.field_bottom.state, { type: 'FOCUSED', highlighted: true });
 });
@@ -218,7 +218,7 @@ test('an unknown ID is loud on pg_work5_t3 too', () => {
 
 test('an unknown template is refused rather than silently sent', () => {
   assert.throws(
-    () => buildDisplayCommand({ id: '1', visitor: NORMAN_T3, ...baseT3, template: 'pg_work9_t9' }),
+    () => buildDisplayCommand({ id: '1', visitor: NOLAN_T3, ...baseT3, template: 'pg_work9_t9' }),
     /unknown template/
   );
 });

@@ -65,6 +65,12 @@ export function mayAutoConnect(s) {
   return { ok: true, reason: '' };
 }
 
+/** JSON-stringify with every MAI cell's text replaced. Headers stay, because
+ *  "Company" or "Full Name of Visitor" is exactly what makes an error readable. */
+export function redactDisplayText(value) {
+  return JSON.stringify(value, (k, v) => (k === 'text_content' || k === 'title' ? '[redacted]' : v));
+}
+
 export class ScannerLink {
   /**
    * @param {object} opts
@@ -280,7 +286,10 @@ export class ScannerLink {
         this._emit('scan', frame);
         return;
       case 'error':
-        this._log(`INSIGHT Mobile reported errors: ${JSON.stringify(frame.errors)}`, 'error');
+        // An error frame may echo our display command back, and that command
+        // carries a visitor's name and company. The log can be copied off the
+        // phone (Copy log), so every displayed text is redacted before logging.
+        this._log(`INSIGHT Mobile reported errors: ${redactDisplayText(frame.errors)}`, 'error');
         return;
       case 'ack':
         this._log(`ack for ${frame.ackFor}`, 'ok');

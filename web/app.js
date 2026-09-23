@@ -24,10 +24,11 @@ import { openDb, loadRoster, saveRoster, putCheckin, putCheckins, allCheckins, r
 const $ = id => document.getElementById(id);
 
 /**
- * Where check-ins go. Empty means "nowhere yet": the AWS Lambda Function URL
- * does not exist, so the app is honest about it rather than pretending a
- * DynamoDB write happened. Set this (or ?api=... once) and the same outbox
- * that already works starts draining to the real backend with no other change.
+ * Where check-ins go. Empty by design: there is no backend (AWS was dropped),
+ * so check-ins stay on the phone and the UI says so rather than pretending a
+ * server write happened. The path is kept dormant, not deleted: a check-in
+ * carries no name, so pointing ?api= at an endpoint later exposes only badge
+ * IDs and timestamps.
  */
 const API_BASE = new URLSearchParams(location.search).get('api')
   || localStorage.getItem('apiBase')
@@ -255,6 +256,15 @@ async function bootRoster() {
 $('fRoster').onchange = async ev => {
   const file = ev.target.files?.[0];
   if (!file) return;
+  // The raw SharePoint export is a CSV with e-mail and phone columns. It must
+  // never be loaded onto a phone, and the phone must not even parse it: parsing
+  // would put those values in memory and, on a bad day, in the log.
+  if (!/\.json$/i.test(file.name) || file.type === 'text/csv') {
+    log(`refused ${file.name}: phones only accept roster.json built by tools/build-roster.mjs, never the raw export`, 'error');
+    alert('This is not a roster file.\n\nLoad the roster.json produced by build-roster.mjs on the laptop. Never load the raw CSV export: it contains e-mail addresses and phone numbers.');
+    ev.target.value = '';
+    return;
+  }
   try {
     const payload = JSON.parse(await file.text());
     const decision = acceptReplacement(state.rosterMeta, payload);

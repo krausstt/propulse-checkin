@@ -13,6 +13,7 @@
     "mock": "node tools/mock-insight.mjs",
     "roster": "node tools/build-roster.mjs",
     "demo-roster": "node tools/build-roster.mjs data/sample/registrants.sample.csv --out web/demo-roster.sample.json",
-    "serve": "node tools/serve.mjs"
+    "serve": "node tools/serve.mjs",
+    "check-public": "node tools/check-public.mjs"
   }
 }

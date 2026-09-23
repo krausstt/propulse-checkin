@@ -1,9 +1,10 @@
 /**
- * roster.js - the visitor lookup table, as a versioned read replica.
+ * roster.js - the visitor lookup table, held on the phone.
  *
- * DynamoDB is the writer of record. This is a cache: a whole roster payload
- * pulled once, verified, and held in IndexedDB so that a scan resolves with no
- * network in the loop. Venue WiFi must never be able to break the greeting.
+ * The roster is built on the laptop by tools/build-roster.mjs and carried to
+ * each phone by hand (company OneDrive/Teams, never GitHub). It is verified and
+ * held in IndexedDB so that a scan resolves with no network in the loop. Venue
+ * WiFi must never be able to break the greeting.
  *
  * Pure functions only - no IndexedDB, no fetch, no clock. Storage lives in
  * idb.js, the clock is injected. Same contract as mai.js, same reason: this is
@@ -28,6 +29,10 @@ export function normalizeId(raw) {
   return s.replace(/^0+(?=\d)/, '');
 }
 
+/** Exactly what a MAI template cell needs, plus status. Nothing else may
+ *  exist on a phone. Adding a key here widens the firewall: see CLAUDE.md rule 3. */
+export const ALLOWED_FIELDS = new Set(['full_name', 'host', 'badge_location', 'company', 'status']);
+
 /**
  * Reject a payload that is not a roster before it can poison the cache.
  *
@@ -50,6 +55,24 @@ export function validateRoster(payload) {
     return errors; // nothing below can run without it
   }
   const ids = Object.keys(payload.visitors);
+
+  // The PII firewall, enforced a second time on the phone. build-roster.mjs is
+  // the first line: it drops e-mail, phone, address and title on the laptop.
+  // But the roster reaches the phones by hand (OneDrive, Teams, USB), and a
+  // hand-carried file can be the wrong file. So a roster record carrying any
+  // key outside the allowlist is refused outright, and the error names only
+  // the offending KEYS - never values, which would put the PII in the log.
+  const forbidden = new Set();
+  for (const record of Object.values(payload.visitors)) {
+    if (!record || typeof record !== 'object') continue;
+    for (const key of Object.keys(record)) if (!ALLOWED_FIELDS.has(key)) forbidden.add(key);
+  }
+  if (forbidden.size) {
+    errors.push(
+      `refusing roster: records carry fields that must never reach a phone (${[...forbidden].join(', ')}). ` +
+      'Rebuild it with tools/build-roster.mjs.'
+    );
+  }
   if (ids.length === 0) {
     errors.push('roster is empty - refusing to replace a working cache with nothing');
   }

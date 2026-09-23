@@ -55,6 +55,9 @@ jobs:
           fi
           echo "PII firewall intact"
 
+      - name: Check the CONTENT of every tracked file, not just its name
+        run: node tools/check-public.mjs
+
       - name: Unit tests
         run: npm test
 
