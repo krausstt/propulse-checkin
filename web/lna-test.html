@@ -64,6 +64,7 @@
   <button id="bDisplay">B2 · Send display_v2! to the MAI</button>
   <button id="bLong">B3 · Send longest-name legibility test</button>
   <button id="bBad">B4 · Send a deliberately invalid command</button>
+  <button id="bAck">B5 · Send WITH ack_required (unverified field)</button>
 </div>
 
 <div class="card">
@@ -116,9 +117,12 @@ function bumpLaunchCount() {
 }
 
 // --- Test A1: which permission name does this Chrome know? ---------------
-// The WICG spec registers "local-network" and "loopback-network"; Chromium also
-// carries "local-network-access" as a legacy alias. Which one is live is exactly
-// what we cannot establish from documentation - so probe all three.
+// The WICG spec appears to split the name by address space: "local-network" for
+// a private-range address, "loopback-network" for 127.0.0.1. Chromium is also
+// reported to answer to "local-network-access". Our target IS loopback, so
+// "loopback-network" is the one to watch - but the Chrome and WICG docs are not
+// reachable from the build environment, and a name that differs by one word
+// makes the permission unqueryable. Probe all three and believe the device.
 document.getElementById('bPerm').onclick = async () => {
   log('--- A1 permission probe ---');
   if (!navigator.permissions) { log('navigator.permissions unavailable', 'bad'); return; }
@@ -198,6 +202,12 @@ document.getElementById('bListen').onclick = () => {
   setTimeout(() => log('--- B1 window closed ---', 'warn'), 60000);
 };
 
+// Mirrors the captured payload in web/src/mai.test.js field for field. Nothing
+// is added here that the capture does not contain: an extra key that INSIGHT
+// Mobile happens to reject would fail this test for a reason that has nothing
+// to do with what the test is measuring. ack_required is exactly such a key -
+// it is not in the capture, so it gets its own button (B5) where a rejection is
+// attributable to it.
 function displayCommand({ id, name, host, badge }) {
   return {
     active_screen_view: 'SCREEN_VIEW_1',
@@ -208,7 +218,6 @@ function displayCommand({ id, name, host, badge }) {
     forced_orientation: 'LANDSCAPE',
     gateway_serial: learned.gateway_serial || undefined,
     ref_id: 'SCREEN_1',
-    ack_required: 'ON_HANDLED',
     screen_views: [{
       ref_id: 'SCREEN_VIEW_1',
       pg_work4_t4: {
@@ -237,7 +246,7 @@ function send(obj, label) {
 }
 
 document.getElementById('bDisplay').onclick = () =>
-  send(displayCommand({ id: '1', name: 'Norman Wang', host: 'Rohan', badge: 'B-12' }), 'display_v2! (normal)');
+  send(displayCommand({ id: '1', name: 'Nolan Wong', host: 'Rohan', badge: 'B-12' }), 'display_v2! (normal)');
 
 document.getElementById('bLong').onclick = () =>
   send(displayCommand({
@@ -251,6 +260,17 @@ document.getElementById('bBad').onclick = () => {
   const bad = displayCommand({ id: '1', name: 'X', host: 'Y', badge: 'Z' });
   bad.screen_views[0].pg_work4_t4.field_bottom.ref_id = 'x'.repeat(40);
   send(bad, 'deliberately invalid (40-char ref_id)');
+};
+
+// Does INSIGHT Mobile acknowledge a handled command? If it does, the app gets a
+// delivery signal instead of fire-and-forget, which matters with a 5-deep
+// command queue. Run this only AFTER B2 has passed, so that a failure here is
+// unambiguously about ack_required and not about the payload as a whole.
+document.getElementById('bAck').onclick = () => {
+  const cmd = displayCommand({ id: '1', name: 'Nolan Wong', host: 'Rohan', badge: 'B-12' });
+  cmd.ack_required = 'ON_HANDLED';
+  log('B5 adds a key that is NOT in the captured payload - a rejection here is expected-ish.', 'warn');
+  send(cmd, 'display_v2! + ack_required:ON_HANDLED');
 };
 
 // --- log utilities -------------------------------------------------------

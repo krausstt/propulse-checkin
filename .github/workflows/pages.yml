@@ -1,0 +1,77 @@
+# Publishes web/ to GitHub Pages.
+#
+# READ THIS BEFORE ENABLING: a GitHub Pages site is PUBLIC even when the
+# repository is private. Private Pages needs GitHub Enterprise Cloud. So this
+# workflow may only ever publish code and the synthetic sample roster. The real
+# registrant export must never be committed, and demo-roster.sample.json is
+# built from data/sample/ and nothing else.
+#
+# The deployed origin matters beyond hosting: Chrome's Local Network Access
+# permission is granted PER ORIGIN, so the phones must be provisioned against
+# the origin they will actually run on. Moving to the ProGlove custom subdomain
+# later voids every grant made on *.github.io.
+name: Deploy check-in app to Pages
+
+on:
+  push:
+    branches: [main, main-j21uya]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  guard:
+    name: PII firewall
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Refuse to publish anything but the synthetic sample
+        run: |
+          set -euo pipefail
+          # Any CSV/XLSX other than the one synthetic sample means the firewall
+          # leaked. Fail before the deploy, not after the names are on a public
+          # URL: a name on a public origin cannot be recalled.
+          leaked=$(git ls-files '*.csv' '*.xlsx' '*.xls' '*.tsv' \
+            | grep -v '^data/sample/registrants.sample.csv$' || true)
+          if [ -n "$leaked" ]; then
+            echo "::error::registrant data is tracked in git: $leaked"
+            exit 1
+          fi
+          # The published roster must be the one built from the sample.
+          if ! grep -q '"source_file":"registrants.sample.csv"' web/demo-roster.sample.json; then
+            echo "::error::web/demo-roster.sample.json was not built from the synthetic sample"
+            exit 1
+          fi
+          echo "PII firewall intact"
+
+      - name: Check the CONTENT of every tracked file, not just its name
+        run: node tools/check-public.mjs
+
+      - name: Unit tests
+        run: npm test
+
+  deploy:
+    needs: guard
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+      - id: deployment
+        uses: actions/deploy-pages@v4

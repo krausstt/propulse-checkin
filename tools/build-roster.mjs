@@ -4,15 +4,24 @@
  * lookup table the check-in app needs.
  *
  * This is the PII firewall. It runs on your laptop, against a CSV you exported
- * yourself. Of the 21 columns in the marketing sheet it keeps FOUR:
+ * yourself. Of the 21 columns in the marketing sheet it keeps FIVE:
  *
  *     Propulse ID  ->  id              (the QR payload, the lookup key)
  *     Full Name    ->  full_name       (MAI field_bottom)
- *     Account Owner->  host            (MAI field_top_right)
- *     Badge location-> badge_location  (MAI field_middle_left)
+ *     Account Owner->  host            (a MAI cell; which one depends on template)
+ *     Badge location-> badge_location  (a MAI cell; which one depends on template)
+ *     Company      ->  company         (pg_work5_t3 only - field_middle_right)
  *
- * E-mail, phone, address, company, title and member status are read, counted,
- * and then dropped. They never reach the cloud, the phones, or git.
+ * E-mail, phone, address and title are read, counted, and then dropped. They
+ * never reach the cloud, the phones, or git.
+ *
+ * COMPANY IS A DELIBERATE WIDENING OF THE FIREWALL. The pg_work4_t4 template
+ * has four cells and needed four fields. The pg_work5_t3 template has five and
+ * shows the visitor's employer, so the employer now has to travel from the
+ * sheet to the phone. Company is business-card data rather than contact data,
+ * but it is still one more column crossing the line, and it was added because
+ * the template demanded it - not because it was convenient. If the booth ever
+ * goes back to pg_work4_t4, take it out again.
  *
  * Zero third-party dependencies - deliberately. A script that handles real
  * customer PII should not pull an npm tree it cannot audit.
@@ -91,6 +100,7 @@ const COLUMNS = {
   last_name:      ['lastname'],
   host:           ['accountowner', 'host', 'relatedrecordowner'],
   badge_location: ['badgelocation', 'badgeloc', 'location'],
+  company:        ['company', 'accountname', 'organisation', 'organization'],
   status:         ['memberstatus', 'status'],
 };
 
@@ -141,7 +151,11 @@ if (rows.length < 2) { console.error(`${inPath}: no data rows found.`); process.
 const header = rows[0];
 const { found, missing } = resolveColumns(header);
 
-const hardMissing = missing.filter(m => !['full_name', 'first_name', 'last_name', 'status'].includes(m));
+// company is soft: a roster without it still greets everyone, it just shows an
+// em dash in one cell. Failing the whole build over it would be worse.
+const hardMissing = missing.filter(
+  m => !['full_name', 'first_name', 'last_name', 'status', 'company'].includes(m)
+);
 if (hardMissing.length) {
   console.error(`\n${inPath}: could not find required column(s): ${hardMissing.join(', ')}`);
   console.error(`Headers seen: ${header.map(h => JSON.stringify(h.trim())).join(', ')}`);
@@ -157,7 +171,7 @@ const cell = (row, key) => (found[key] !== undefined ? (row[found[key]] ?? '').t
 
 const roster = {};
 const seen = new Map();
-const stats = { rows: 0, kept: 0, skippedNoId: 0, duplicates: 0, noBadgeLocation: 0, noHost: 0, byStatus: {} };
+const stats = { rows: 0, kept: 0, skippedNoId: 0, duplicates: 0, noBadgeLocation: 0, noHost: 0, noCompany: 0, byStatus: {} };
 let sampleRecord = null;
 
 for (const row of rows.slice(1)) {
@@ -175,6 +189,7 @@ for (const row of rows.slice(1)) {
                    [cell(row, 'first_name'), cell(row, 'last_name')].filter(Boolean).join(' ');
   const host = cell(row, 'host');
   const badgeLocation = cell(row, 'badge_location');
+  const company = cell(row, 'company');
   const status = cell(row, 'status') || 'Unknown';
 
   stats.byStatus[status] = (stats.byStatus[status] || 0) + 1;
@@ -188,10 +203,11 @@ for (const row of rows.slice(1)) {
 
   if (!badgeLocation) stats.noBadgeLocation++;
   if (!host) stats.noHost++;
+  if (!company) stats.noCompany++;
 
   // Cancelled/no-show registrants are kept on purpose: at the door, showing the
   // right name for someone who cancelled but turned up anyway beats "not found".
-  roster[id] = { full_name: fullName, host, badge_location: badgeLocation, status };
+  roster[id] = { full_name: fullName, host, badge_location: badgeLocation, company, status };
   stats.kept++;
   if (!sampleRecord) sampleRecord = { id, ...roster[id] };
 }
@@ -217,7 +233,7 @@ const bytes = Buffer.byteLength(JSON.stringify(payload));
 console.log(`\n  ${basename(inPath)}  ->  ${outPath}`);
 console.log(`  delimiter ${JSON.stringify(delimiter)}   ${stats.rows} rows read   ${stats.kept} visitors kept   ${(bytes / 1024).toFixed(1)} KB`);
 console.log(`  checksum ${payload.checksum}`);
-console.log(`  dropped columns: every field except id, full_name, host, badge_location, status`);
+console.log(`  dropped columns: every field except id, full_name, host, badge_location, company, status`);
 
 console.log(`\n  status breakdown:`);
 for (const [s, n] of Object.entries(stats.byStatus).sort((a, b) => b[1] - a[1])) {
@@ -227,6 +243,8 @@ for (const [s, n] of Object.entries(stats.byStatus).sort((a, b) => b[1] - a[1]))
 if (stats.skippedNoId) console.log(`\n  ${stats.skippedNoId} row(s) skipped: no ProPulse ID`);
 if (stats.noBadgeLocation) warnings.push(`${stats.noBadgeLocation} visitor(s) have no badge location - the MAI will show a blank field for them.`);
 if (stats.noHost) warnings.push(`${stats.noHost} visitor(s) have no host/account owner.`);
+if (stats.noCompany) warnings.push(`${stats.noCompany} visitor(s) have no company - the pg_work5_t3 template will show an em dash for them.`);
+if (missing.includes('company')) warnings.push('No company column found. The pg_work5_t3 template will show an em dash in field_middle_right for everyone.');
 
 if (warnings.length) {
   console.log(`\n  ${warnings.length} warning(s):`);

@@ -31,11 +31,18 @@ is re-included. Uses `data/*` not `data/` deliberately — git cannot re-include
 file whose parent directory is excluded. **Verify with `git check-ignore -v`
 after touching it.** A name in git history is permanent.
 
-### 3. Only four fields ever leave the laptop
+### 3. Only the fields the template displays ever leave the laptop
 
-`propulse_id`, `full_name`, `host`, `badge_location`. E-mail, phone, address,
-company and title are read by the roster builder and dropped. The MAI template
-has exactly four cells, so nothing else is needed. Do not "helpfully" add fields.
+Currently FIVE: `propulse_id`, `full_name`, `host`, `badge_location`, `company`.
+E-mail, phone, address and title are read by the roster builder and dropped.
+
+This was four until the `pg_work5_t3` capture arrived (2026-09-22). That
+template has a fifth cell showing the visitor's employer, so `company` now has
+to travel from the sheet to the phone. The rule is unchanged in spirit: a field
+crosses the line only when a template cell demands it, never because it is
+convenient. If the booth returns to `pg_work4_t4`, drop `company` again.
+
+Still absolutely not: e-mail, phone, address, title.
 
 ---
 
@@ -62,6 +69,19 @@ has exactly four cells, so nothing else is needed. Do not "helpfully" add fields
   that prompt cold.
 - Last year's Lovable app is **void as evidence** — it predates Chrome 147.
 
+### Partially answered since (2026-09-22, low-grade evidence)
+
+A Google-owned repo states WebSocket connections to a local address "start
+triggering permission **prompts**", which suggests prompt rather than hard-fail.
+But `developer.chrome.com`, `chromestatus.com`, `wicg.github.io` and
+`chromeenterprise.google` are ALL blocked by the cloud session's egress proxy,
+so no primary source could be read and nothing Android-specific was found.
+Treat as a lead. Also unverified: the WICG spec seems to split the permission
+name by address space (`loopback-network` for 127.0.0.1, `local-network` for
+private ranges), and a separate `LoopbackNetworkAccessAllowedForUrls` policy may
+exist alongside `LocalNetworkAccessAllowedForUrls`. `LocalNetworkAccess
+RestrictionsTemporaryOptOut` is removed in Chrome 156, so it is not a plan.
+
 ### Unresolved, and gating
 
 `web/lna-test.html` exists to settle these on real hardware. Until it is run,
@@ -75,6 +95,11 @@ treat the answers as unknown and do not design around a guess:
 5. Does the `scan` event really carry `device_serial` **and** `gateway_serial`?
    (If yes, nothing is hardcoded per phone — that is the intended design.)
 
+**Open question for the ProGlove team:** does INSIGHT Mobile forward Streams
+API traffic, or logs containing it, to any ProGlove cloud (INSIGHT web portal,
+telemetry)? Every `display_v2!` carries a visitor's name and company. If
+INSIGHT Mobile uploads it, names leave the phone through our own product.
+
 **Open question for the ProGlove team:** does INSIGHT Mobile support **MQTT**?
 If it does, the loopback problem disappears entirely — phone ↔ AWS IoT Core ↔
 web app over WSS, no LNA at all. Costs offline capability, so it is the fallback,
@@ -86,33 +111,59 @@ not the default. This is the contingency if test 1 comes back "hard fail".
 
 | Layer | Choice |
 |---|---|
-| App | Buildless PWA — plain ES modules, no bundler, no framework |
-| Hosting | GitHub Pages on a ProGlove **custom subdomain** (pins one origin for permission policy; `*.github.io` is shared and would over-grant) |
-| Backend | AWS SAM → 1× Lambda Function URL + 1× DynamoDB table, `eu-central-1` |
-| Roster | Served by the Lambda behind an event key, cached in IndexedDB |
-| Check-ins | Append-only, client-generated UUID idempotency key, local outbox flushed on reconnect |
+| App | Buildless PWA, plain ES modules, no bundler, no framework |
+| Hosting | GitHub Pages, **code only**. Custom ProGlove subdomain before the phones are provisioned (the LNA grant is per origin; `*.github.io` grants are void after a move) |
+| Backend | **None.** AWS (Lambda + DynamoDB) was dropped on 2026-09-23 |
+| Roster | Built on the laptop by `build-roster.mjs`, carried to each phone **by hand** via company OneDrive/Teams, loaded with *Load roster file*, held in IndexedDB |
+| Check-ins | Append-only on the phone, client-generated UUID idempotency key. They carry **no name**: `{idempotency_key, propulse_id, device_id, scanned_at, matched}`. Held on device; the sync path is dormant unless `?api=` is set |
 
-**A GitHub Pages site is public even from a private repo** (private sites need
-Enterprise Cloud). So Pages carries **code only** — never the roster.
+**This repo and its Pages site are public.** Nothing with a real name may be
+committed or published, ever. Two gates enforce it and neither may be relaxed:
 
-"Single source of truth" means DynamoDB is the only *writer of record*. The
-IndexedDB roster cache is a versioned read replica, not a per-device export.
-Venue WiFi must never be a hard dependency of the greeting.
+1. `.gitignore` stops real files **by name** (every CSV/XLSX, `roster.json`).
+2. `tools/check-public.mjs` checks **content** of every tracked file (e-mail
+   domains, phone-shaped strings, a denylist of known real strings, stray
+   rosters, forbidden roster fields). CI runs it before every deploy. Run it
+   yourself before every push: `npm run check-public`.
+
+The raw SharePoint export never leaves the laptop. What travels to the phones
+is the **reduced** `roster.json`, never the CSV: the phone app refuses `.csv`
+files and refuses any roster whose records carry a key outside
+`ALLOWED_FIELDS` in `web/src/roster.js`.
+
+The sample data is **pseudonymised, not merely synthetic**: row 1 was derived
+from a real record. Its name and company were replaced on 2026-09-23. The
+original strings survive in git history before that date (see the denylist in
+`check-public.mjs`). Never "restore realism" to the sample from a real export.
+
+See `docs/data-flow.md` for the full path and every place a name exists.
 
 ---
 
 ## Ground truth
 
-`web/src/mai.test.js` holds a captured `display_v2!` payload from the customer's
-own INSIGHT Mobile install, asserted by deep-equal. **That capture is the spec.**
-If a change breaks that test, the change is wrong.
+`web/src/mai.test.js` holds TWO captured `display_v2!` payloads from the
+customer's own INSIGHT Mobile install, each asserted by deep-equal. **Those
+captures are the spec.** If a change breaks either test, the change is wrong.
 
-- Template `pg_work4_t4`: `field_top_left`, `field_top_right`,
-  `field_middle_left`, `field_bottom`, plus optional `title`. There is **no**
-  `field_middle_right`.
+- Template `pg_work4_t4`: `field_top_left` (ID), `field_top_right` (Host),
+  `field_middle_left` (Badge Location), `field_bottom` (Full Name, highlighted),
+  plus `title`. No `field_middle_right`. Carries `forced_orientation`.
+- Template `pg_work5_t3`: `field_top_left` (ID), `field_top_right` (Badge
+  Location), `field_middle_left` (Host), `field_middle_right` (**Company**,
+  highlighted), `field_bottom` (Full Name, not highlighted), plus `title`.
+  Carries **no** `forced_orientation` key at all.
+
+These two are not old and new. They are two templates that both exist, they
+order their cells differently, and they put the highlight on different cells.
+`pg_work5_t3` is the app default. Do not collapse them or normalise one to the
+other without a capture that proves they are the same thing.
 - Badge QR content is a bare integer, e.g. `1`. Confirmed by Tobias. Marketing
   print it; it is not changeable.
-- `forced_orientation: "LANDSCAPE"` is correct for this template.
+- `forced_orientation: "LANDSCAPE"` is correct for `pg_work4_t4` and is absent
+  from the `pg_work5_t3` capture. Do not add it there "for consistency": a key
+  the device has never been observed to receive is how a working template turns
+  into an unexplained rejection at the booth.
 - INSIGHT Mobile's command queue is only **5 deep** — debounce display sends.
 
 ---
@@ -121,6 +172,11 @@ If a change breaks that test, the change is wrong.
 
 ```bash
 npm test                                             # node:test, no deps
+npm run e2e                                          # real Chromium vs. the mock server
+npm run mock                                         # stand-in for INSIGHT Mobile
+npm run serve                                        # static server for web/ (plain HTTP)
+npm run demo-roster                                  # rebuild the synthetic bundled roster
+npm run check-public                                 # content gate: run before every push
 node tools/build-roster.mjs <in.csv> --out roster.json --strict
 node tools/build-roster.mjs data/sample/registrants.sample.csv --sample
 ```
