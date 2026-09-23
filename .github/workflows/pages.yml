@@ -15,6 +15,8 @@ name: Deploy check-in app to Pages
 on:
   push:
     branches: [main, main-j21uya]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -61,8 +63,13 @@ jobs:
       - name: Unit tests
         run: npm test
 
+  # Deploy only from main. The github-pages environment accepts deployments from
+  # the default branch alone, so a deploy attempted from a feature branch or a
+  # PR is a guaranteed red run that says nothing. Branches and PRs still get the
+  # full PII guard above, which is the part that must never be skipped.
   deploy:
     needs: guard
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
