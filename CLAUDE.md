@@ -170,6 +170,16 @@ other without a capture that proves they are the same thing.
   the device has never been observed to receive is how a working template turns
   into an unexplained rejection at the booth.
 - INSIGHT Mobile's command queue is only **5 deep** — debounce display sends.
+- Streams API 3.6.6 (summary supplied by Tobias, 2026-09-23; itself AI-written,
+  so second-grade): inbound `scan` carries `scan_code`, optional
+  `scan_data_base64`, `device_serial`, optional `gateway_serial`. Commands may
+  carry `ack_required: ON_RECEIVE | ON_HANDLED`. Its `display_v2!` example uses
+  a `workflow`/`fields` shape for MARK Display; the captures from the customer's
+  INSIGHT install use `pg_work*` templates, and the captures win.
+- "The MAI does not change" is bisected on the device with Diagnostics → MAI
+  test (`web/src/diag.js`): feedback! first (no template), then each capture,
+  then the app payload, each with an ack. Do not rewrite the display command
+  on a guess before those results exist.
 
 ---
 

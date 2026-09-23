@@ -130,7 +130,7 @@ function onCommand(text) {
     const template = Object.keys(view).find(k => k !== 'ref_id');
     const cells = view[template] ?? {};
     console.log(`\n[mock] <- display_v2! template=${template} event_id=${msg.event_id}`);
-    console.log(`       forced_orientation=${msg.forced_orientation ?? '(absent)'} device=${msg.device_serial}`);
+    console.log(`       forced_orientation=${msg.forced_orientation ?? '(absent)'} device=${msg.device_serial} ack_required=${msg.ack_required ?? '(none)'}`);
     for (const [name, cell] of Object.entries(cells)) {
       if (name === 'title') { console.log(`       title: ${cell}`); continue; }
       const st = cell?.state;

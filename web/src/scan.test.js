@@ -104,3 +104,10 @@ test('base64url decoding fails soft', () => {
   assert.equal(decodeBase64Url('!!!not base64!!!'), null);
   assert.equal(decodeBase64Url(''), null);
 });
+
+test('the documented scan_data_base64 field is decoded', () => {
+  const frame = JSON.parse(scanFrame());
+  delete frame.scan_code;
+  frame.scan_data_base64 = Buffer.from('17').toString('base64');
+  assert.equal(parseFrame(JSON.stringify(frame)).code, '17');
+});

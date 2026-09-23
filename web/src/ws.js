@@ -292,13 +292,15 @@ export class ScannerLink {
         this._log(`INSIGHT Mobile reported errors: ${redactDisplayText(frame.errors)}`, 'error');
         return;
       case 'ack':
-        this._log(`ack for ${frame.ackFor}`, 'ok');
+        this._log(`ACK from INSIGHT Mobile for ${frame.ackFor}: ${redactDisplayText(frame.msg)}`, 'ok');
         return;
       case 'unparseable':
         this._log(`unparseable frame (${frame.reason})`, 'warn');
         return;
       default:
-        this._log(`frame ${frame.kind}${frame.eventType ? ` ${frame.eventType}` : ''}`, 'dim');
+        // Unknown shapes are logged with displayed text redacted. This is where
+        // an ack or an error we did not anticipate would otherwise vanish.
+        this._log(`frame ${frame.kind}${frame.eventType ? ` ${frame.eventType}` : ''}: ${redactDisplayText(frame.msg)}`, 'dim');
     }
   }
 
@@ -322,6 +324,14 @@ export class ScannerLink {
       this._sendTimer = null;
       this._flushNow();
     }, wait);
+  }
+
+  /** Immediate send for the diagnostics panel. Bypasses coalescing on
+   *  purpose: a bisection probe must go out exactly once, exactly now. */
+  sendNow(command) {
+    if (!this.ws || this.ws.readyState !== 1) { this._log('probe not sent: socket not open', 'error'); return false; }
+    try { this.ws.send(JSON.stringify(command)); return true; }
+    catch (e) { this._log(`probe send failed: ${e.message}`, 'error'); return false; }
   }
 
   _flushNow() {

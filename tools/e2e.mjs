@@ -157,6 +157,27 @@ try {
   check('check-ins survive a reload', true);
   check('the socket does not silently reconnect after reload', (await page.textContent('#linkText')).includes('connect'));
 
+  console.log('\nSIMULATE after reload (serials must be remembered)');
+  const displaysBefore = (mockOut.match(/display_v2!/g) || []).length;
+  await page.click('#bConnect');
+  await until('socket open again', async () => (await page.textContent('#linkText')) === 'Scanner connected');
+  await page.click('#bSim');
+  await until('simulated display reached the mock', () => (mockOut.match(/display_v2!/g) || []).length > displaysBefore);
+  check('Simulate scan reaches the MAI without a fresh real scan', true);
+
+  console.log('\nMAI PROBES');
+  await page.evaluate(() => { document.querySelector('details').open = true; });
+  for (const [label, expect] of [
+    ['Feedback beep (no display)', /<- feedback!/],
+    ['Capture pg_work4_t4, verbatim', /template=pg_work4_t4/],
+    ['Capture pg_work5_t3, original states', /field_middle_right.*<-- FOCUSED HIGHLIGHTED/],
+  ]) {
+    await page.click(`#probes button:has-text("${label}")`);
+    await until(label, () => expect.test(mockOut));
+    check(`probe sent: ${label}`, true);
+  }
+  check('probes ask for an ack by default', /ack_required=ON_HANDLED/.test(mockOut), 'mock did not see ack_required');
+
   check('no uncaught page errors', pageErrors.length === 0, pageErrors.join(' | '));
 } catch (e) {
   console.log(`\nABORTED: ${e.message}`);

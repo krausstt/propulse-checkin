@@ -84,9 +84,13 @@ function readScanCode(msg) {
     const v = msg[key];
     if (typeof v === 'string' && v.trim()) return v.trim();
   }
-  if (typeof msg.scan_bytes === 'string' && msg.scan_bytes.trim()) {
-    const decoded = decodeBase64Url(msg.scan_bytes.trim());
-    if (decoded) return decoded;
+  // scan_data_base64 is the Streams API 3.6.6 name; scan_bytes is what an
+  // earlier search summary claimed. Accept both.
+  for (const key of ['scan_data_base64', 'scan_bytes']) {
+    if (typeof msg[key] === 'string' && msg[key].trim()) {
+      const decoded = decodeBase64Url(msg[key].trim());
+      if (decoded) return decoded;
+    }
   }
   return null;
 }

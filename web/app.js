@@ -19,9 +19,15 @@ import { indexVisitors, lookup, validateRoster, acceptReplacement } from './src/
 import {
   createCheckin, isDuplicateScan, dueForSend, markSent, markFailed, outboxStats,
 } from './src/outbox.js';
+import { PROBES, withAck } from './src/diag.js';
 import { openDb, loadRoster, saveRoster, putCheckin, putCheckins, allCheckins, requestPersistence } from './src/idb.js';
 
 const $ = id => document.getElementById(id);
+
+/** Shown in Diagnostics. The service worker serves the cached shell first and
+ *  refreshes in the background, so the first load after a deploy still runs
+ *  the previous build. If this tag is old, close and reopen the app once. */
+const BUILD = '2026-09-23.3 probes';
 
 /**
  * Where check-ins go. Empty by design: there is no backend (AWS was dropped),
@@ -85,6 +91,25 @@ link.on('status', s => {
   $('bConnect').textContent = s.everConnected ? 'Reconnect scanner' : 'Connect scanner';
 });
 
+// Serials are learned from the scan event, and until now lived only in memory:
+// every reload forgot them, so Simulate scan silently sent nothing until a real
+// badge was scanned again. Remember the last ones seen on this phone. A real
+// scan always overwrites them, so a swapped MAI corrects itself on first scan.
+try {
+  const saved = JSON.parse(localStorage.getItem('serials') || 'null');
+  if (saved?.device_serial) { link.serials = saved; }
+} catch {}
+link.on('serials', s => {
+  try { localStorage.setItem('serials', JSON.stringify(s)); } catch {}
+  renderSerials();
+});
+function renderSerials() {
+  const s = link.serials;
+  $('serials').textContent = s.device_serial
+    ? `MAI ${s.device_serial}${s.gateway_serial ? ` · gateway ${s.gateway_serial}` : ' · no gateway_serial seen'}`
+    : 'no MAI serial yet: scan one real badge';
+}
+
 link.on('scan', frame => { onScan(frame).catch(e => log(`scan handling failed: ${e.message}`, 'error')); });
 
 // --- the scan path -------------------------------------------------------
@@ -107,7 +132,7 @@ async function onScan(frame) {
 
   // 1. The screen. Fire and forget - a greeting is worthless a second later.
   if (link.serials.device_serial) {
-    link.sendDisplay(buildDisplayCommand({
+    const cmd = buildDisplayCommand({
       id,
       visitor,
       deviceSerial: link.serials.device_serial,
@@ -115,9 +140,12 @@ async function onScan(frame) {
       eventId: crypto.randomUUID(),
       now,
       template: state.template,
-    }));
+    });
+    link.sendDisplay(cmd);
+    log(`-> display_v2! ${cmd.event_id} to ${cmd.device_serial} (${state.template}, ${JSON.stringify(cmd).length} bytes)`, 'dim');
   } else {
-    log('no device_serial learned yet - cannot address the MAI', 'warn');
+    // Loud, because a silent skip is exactly what "the MAI does not change" looks like.
+    log('NOT SENT to the MAI: no device_serial known yet. Scan one real badge first; the serial is remembered after that.', 'error');
   }
 
   // 2. The check-in. Disk first, network later, never the other way round.
@@ -313,6 +341,23 @@ $('bSim').onclick = () => {
   onScan({ code: id }).catch(e => log(e.message, 'error'));
 };
 
+// --- MAI bisection probes ------------------------------------------------
+
+for (const [key, probe] of Object.entries(PROBES)) {
+  const b = document.createElement('button');
+  b.className = 'ghost';
+  b.textContent = probe.label;
+  b.onclick = () => {
+    if (!link.serials.device_serial) { log('probe not sent: no MAI serial yet, scan one real badge first', 'error'); return; }
+    const cmd = withAck(probe.build({ serials: link.serials, eventId: crypto.randomUUID(), now: Date.now() }), $('ack').value);
+    // Synthetic sample text only, so the full payload is safe to log and to copy.
+    log(`--- probe ${key} ---`, 'warn');
+    log(JSON.stringify(cmd), 'dim');
+    if (link.sendNow(cmd)) log(`probe ${key} sent (${cmd.event_id}). Watch the MAI, then this log for an ACK or errors frame.`, 'ok');
+  };
+  $('probes').appendChild(b);
+}
+
 // --- lifecycle -----------------------------------------------------------
 
 // Timestamps, not timer ticks: a backgrounded Android tab has its timers frozen
@@ -330,6 +375,7 @@ window.onunhandledrejection = e => log(`unhandled rejection: ${e.reason}`, 'erro
 (async function boot() {
   const standalone = matchMedia('(display-mode: standalone)').matches;
   $('env').textContent = [
+    `build     ${BUILD}`,
     `origin    ${location.origin}`,
     `secure    ${window.isSecureContext}`,
     `display   ${standalone ? 'installed PWA' : 'browser tab'}`,
@@ -347,6 +393,7 @@ window.onunhandledrejection = e => log(`unhandled rejection: ${e.reason}`, 'erro
     log(`IndexedDB unavailable: ${e.message} - check-ins cannot survive a reload`, 'error');
   }
 
+  renderSerials();
   await bootRoster();
   state.checkins = await allCheckins().catch(() => []);
   renderSync();
