@@ -142,17 +142,22 @@ See `docs/data-flow.md` for the full path and every place a name exists.
 
 ## Ground truth
 
-`web/src/mai.test.js` holds TWO captured `display_v2!` payloads from the
-customer's own INSIGHT Mobile install, each asserted by deep-equal. **Those
-captures are the spec.** If a change breaks either test, the change is wrong.
+`web/src/mai.test.js` holds TWO `display_v2!` payloads, each asserted by
+deep-equal: the captured `pg_work4_t4`, and the captured `pg_work5_t3`
+structure with Tobias's cell states. **Those tests are the spec.** If a change breaks either test, the change is wrong.
 
 - Template `pg_work4_t4`: `field_top_left` (ID), `field_top_right` (Host),
   `field_middle_left` (Badge Location), `field_bottom` (Full Name, highlighted),
   plus `title`. No `field_middle_right`. Carries `forced_orientation`.
 - Template `pg_work5_t3`: `field_top_left` (ID), `field_top_right` (Badge
-  Location), `field_middle_left` (Host), `field_middle_right` (**Company**,
-  highlighted), `field_bottom` (Full Name, not highlighted), plus `title`.
-  Carries **no** `forced_orientation` key at all.
+  Location), `field_middle_left` (Host), `field_middle_right` (Company),
+  `field_bottom` (Full Name), plus `title`. Carries **no** `forced_orientation`
+  key at all. **Cell states (Tobias, 2026-09-23, supersede the capture's):**
+  Full Name `FOCUSED` highlighted; ID `SUCCESS` not highlighted (matched badge
+  only, omitted on a miss); Badge Location `FOCUSED` not highlighted; Host and
+  Company no state. `SUCCESS` has **not yet been seen accepted by a device**:
+  both captures only ever used `FOCUSED`. If the MAI rejects the command, check
+  that first.
 
 These two are not old and new. They are two templates that both exist, they
 order their cells differently, and they put the highlight on different cells.

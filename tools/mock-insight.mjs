@@ -133,7 +133,8 @@ function onCommand(text) {
     console.log(`       forced_orientation=${msg.forced_orientation ?? '(absent)'} device=${msg.device_serial}`);
     for (const [name, cell] of Object.entries(cells)) {
       if (name === 'title') { console.log(`       title: ${cell}`); continue; }
-      const hot = cell?.state ? '  <-- HIGHLIGHTED' : '';
+      const st = cell?.state;
+      const hot = st ? `  <-- ${st.type}${st.highlighted ? ' HIGHLIGHTED' : ''}` : '';
       console.log(`       ${name.padEnd(19)} ${String(cell?.text_header).padEnd(22)} ${cell?.text_content}${hot}`);
     }
     return;

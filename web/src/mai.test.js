@@ -119,8 +119,10 @@ test('parseScannedId accepts badge IDs and rejects everything else', () => {
 });
 
 // ---------------------------------------------------------------------------
-// pg_work5_t3 - the second capture. Five cells, Company added, the highlight
-// moved off the name onto Company, and NO forced_orientation key.
+// pg_work5_t3 - the second capture's structure (five cells, Company, NO
+// forced_orientation) with the cell states Tobias specified on 2026-09-23:
+// Full Name FOCUSED+highlighted, ID SUCCESS, Badge Location FOCUSED quiet,
+// Company and Host stateless. The SUCCESS type is not yet seen on a device.
 // ---------------------------------------------------------------------------
 
 const GOLDEN_T3 = {
@@ -136,19 +138,29 @@ const GOLDEN_T3 = {
       ref_id: 'SCREEN_VIEW_1',
       pg_work5_t3: {
         title: 'ProPulse 2026 Chicago',
-        field_top_left: { text_header: 'ID', text_content: '1', ref_id: 'field_top_left_ref' },
-        field_top_right: { text_header: 'Badge Location', text_content: 'B-12', ref_id: 'field_top_right_ref' },
+        field_top_left: {
+          text_header: 'ID',
+          text_content: '1',
+          ref_id: 'field_top_left_ref',
+          state: { type: 'SUCCESS', highlighted: false },
+        },
+        field_top_right: {
+          text_header: 'Badge Location',
+          text_content: 'B-12',
+          ref_id: 'field_top_right_ref',
+          state: { type: 'FOCUSED', highlighted: false },
+        },
         field_middle_left: { text_header: 'Host', text_content: 'Rohan', ref_id: 'field_middle_left_ref' },
         field_middle_right: {
           text_header: 'Company',
           text_content: 'Anonymized Information Technology Inc',
           ref_id: 'field_middle_right_ref',
-          state: { type: 'FOCUSED', highlighted: true },
         },
         field_bottom: {
           text_header: 'Full Name of Visitor',
           text_content: 'Nolan Wong',
           ref_id: 'field_bottom_ref',
+          state: { type: 'FOCUSED', highlighted: true },
         },
       },
     },
@@ -187,14 +199,28 @@ test('pg_work5_t3 carries no forced_orientation, pg_work4_t4 does', () => {
   assert.equal(t4.forced_orientation, 'LANDSCAPE');
 });
 
-test('pg_work5_t3 highlights Company, pg_work4_t4 highlights the name', () => {
+test('pg_work5_t3 highlights the name, marks ID success and badge location focused', () => {
   const t3 = buildDisplayCommand({ id: '1', visitor: NOLAN_T3, ...baseT3 }).screen_views[0].pg_work5_t3;
-  assert.deepEqual(t3.field_middle_right.state, { type: 'FOCUSED', highlighted: true });
-  assert.equal('state' in t3.field_bottom, false);
+  assert.deepEqual(t3.field_bottom.state, { type: 'FOCUSED', highlighted: true });
+  assert.deepEqual(t3.field_top_left.state, { type: 'SUCCESS', highlighted: false });
+  assert.deepEqual(t3.field_top_right.state, { type: 'FOCUSED', highlighted: false });
+  assert.equal('state' in t3.field_middle_right, false, 'Company carries no state');
+  assert.equal('state' in t3.field_middle_left, false, 'Host carries no state');
+
+  const highlighted = Object.values(t3).filter(c => c?.state?.highlighted);
+  assert.equal(highlighted.length, 1, 'exactly one cell is emphasised');
 
   const t4 = buildDisplayCommand({ id: '1', visitor: NOLAN_T3, ...baseT3, template: 'pg_work4_t4' })
     .screen_views[0].pg_work4_t4;
   assert.deepEqual(t4.field_bottom.state, { type: 'FOCUSED', highlighted: true });
+});
+
+test('a miss never shows SUCCESS on the ID', () => {
+  // "Not Registered" next to a success marker tells the greeter the opposite
+  // of the truth.
+  const t = buildDisplayCommand({ id: '4711', visitor: null, ...baseT3 }).screen_views[0].pg_work5_t3;
+  assert.equal('state' in t.field_top_left, false);
+  assert.deepEqual(t.field_bottom.state, { type: 'FOCUSED', highlighted: true });
 });
 
 test('a visitor with no company still renders every cell', () => {

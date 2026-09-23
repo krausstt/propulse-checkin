@@ -112,7 +112,10 @@ try {
   check('uses the template the UI selected', /template=pg_work5_t3/.test(mockOut));
   check('pg_work5_t3 sends no forced_orientation', /forced_orientation=\(absent\)/.test(mockOut));
   check('device_serial was learned from the scan, not hardcoded', /device=MAIXBEU011089/.test(mockOut));
-  check('Company cell is the highlighted one', /field_middle_right.*HIGHLIGHTED/.test(mockOut));
+  check('full name is FOCUSED and highlighted', /field_bottom.*<-- FOCUSED HIGHLIGHTED/.test(mockOut));
+  check('ID is SUCCESS, not highlighted', /field_top_left.*<-- SUCCESS$/m.test(mockOut));
+  check('badge location is FOCUSED, not highlighted', /field_top_right.*<-- FOCUSED$/m.test(mockOut));
+  check('company carries no state', /field_middle_right[^\n]*Inc$/m.test(mockOut));
   check('full name is in field_bottom', /field_bottom\s+Full Name of Visitor\s+Nolan Wong/.test(mockOut));
 
   console.log('\nCHECK-IN');
