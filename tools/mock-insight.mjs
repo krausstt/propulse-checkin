@@ -17,7 +17,8 @@
  *   node tools/mock-insight.mjs --scan 1 --scan 2 --delay 1500 --once
  *
  * Interactive: type a badge ID and press enter to send that scan.
- * Type "junk" to send a non-badge barcode, "bad" to send a malformed frame.
+ * Type "junk" to send a non-badge barcode, "bad" to send a malformed frame,
+ * "noscanner" to replay INSIGHT Mobile's ERROR_DEVICE_NOT_FOUND frame.
  */
 
 import { createServer } from 'node:http';
@@ -130,10 +131,11 @@ function onCommand(text) {
     const template = Object.keys(view).find(k => k !== 'ref_id');
     const cells = view[template] ?? {};
     console.log(`\n[mock] <- display_v2! template=${template} event_id=${msg.event_id}`);
-    console.log(`       forced_orientation=${msg.forced_orientation ?? '(absent)'} device=${msg.device_serial}`);
+    console.log(`       forced_orientation=${msg.forced_orientation ?? '(absent)'} device=${msg.device_serial} ack_required=${msg.ack_required ?? '(none)'}`);
     for (const [name, cell] of Object.entries(cells)) {
       if (name === 'title') { console.log(`       title: ${cell}`); continue; }
-      const hot = cell?.state ? '  <-- HIGHLIGHTED' : '';
+      const st = cell?.state;
+      const hot = st ? `  <-- ${st.type}${st.highlighted ? ' HIGHLIGHTED' : ''}` : '';
       console.log(`       ${name.padEnd(19)} ${String(cell?.text_header).padEnd(22)} ${cell?.text_content}${hot}`);
     }
     return;
@@ -185,6 +187,17 @@ server.listen(PORT, '127.0.0.1', () => {
       if (line === 'q') process.exit(0);
       if (line === 'junk') return sendScan('4006381333931');       // an EAN off a giveaway
       if (line === 'bad') { console.log('[mock] -> malformed frame'); return broadcast('{not json'); }
+      // The exact frame INSIGHT Mobile sent on the first hardware run
+      // (2026-09-24) when no scanner was connected to it.
+      if (line === 'noscanner') {
+        console.log('[mock] -> errors ERROR_DEVICE_NOT_FOUND (no scanner connected)');
+        return broadcast(JSON.stringify({
+          event_type: 'errors', api_version: '1.0', time_created: Date.now(), event_id: randomUUID(),
+          event_reference_id: randomUUID(), error_severity: 'ERROR', error_message: 'No connected device found',
+          error_code: 'ERROR_DEVICE_NOT_FOUND', device_serial: '<Missing Scanner Serial Number Data>',
+          gateway_serial: GATEWAY_SERIAL,
+        }));
+      }
       sendScan(line);
     });
   }

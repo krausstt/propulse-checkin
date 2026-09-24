@@ -167,8 +167,21 @@ function connect(reason) {
     log(`<- ${e.data}`);
     try {
       const m = JSON.parse(e.data);
-      for (const k of ['device_serial', 'gateway_serial']) {
-        if (m[k] && learned[k] !== m[k]) { learned[k] = m[k]; log(`   learned ${k} = ${m[k]}`, 'ok'); }
+      // Learn serials from SCAN events only. INSIGHT Mobile's error frames put
+      // the placeholder "<Missing Scanner Serial Number Data>" in device_serial
+      // when no scanner is connected; learning that addressed every later
+      // command to nothing (first hardware run, 2026-09-24).
+      if (m.event_type === 'scan') {
+        for (const k of ['device_serial', 'gateway_serial']) {
+          const v = m[k];
+          if (typeof v === 'string' && v && !/^<.*>$/.test(v) && learned[k] !== v) { learned[k] = v; log(`   learned ${k} = ${v}`, 'ok'); }
+        }
+      }
+      if (m.event_type === 'errors') {
+        log(`   INSIGHT error ${m.error_code}: ${m.error_message}`, 'bad');
+        if (m.error_code === 'ERROR_DEVICE_NOT_FOUND' && /^<.*>$/.test(m.device_serial || '')) {
+          log('   -> INSIGHT Mobile has NO scanner connected. Pair the MAI inside INSIGHT Mobile, then scan once.', 'bad');
+        }
       }
       if (m.event_type) log(`   event_type = ${m.event_type}`, 'dim');
     } catch { log('   (not JSON)', 'dim'); }

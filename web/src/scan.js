@@ -84,9 +84,13 @@ function readScanCode(msg) {
     const v = msg[key];
     if (typeof v === 'string' && v.trim()) return v.trim();
   }
-  if (typeof msg.scan_bytes === 'string' && msg.scan_bytes.trim()) {
-    const decoded = decodeBase64Url(msg.scan_bytes.trim());
-    if (decoded) return decoded;
+  // scan_data_base64 is the Streams API 3.6.6 name; scan_bytes is what an
+  // earlier search summary claimed. Accept both.
+  for (const key of ['scan_data_base64', 'scan_bytes']) {
+    if (typeof msg[key] === 'string' && msg[key].trim()) {
+      const decoded = decodeBase64Url(msg[key].trim());
+      if (decoded) return decoded;
+    }
   }
   return null;
 }
@@ -116,8 +120,12 @@ export function decodeBase64Url(s) {
  */
 function readSerials(msg) {
   const out = {};
-  if (typeof msg.device_serial === 'string' && msg.device_serial) out.device_serial = msg.device_serial;
-  if (typeof msg.gateway_serial === 'string' && msg.gateway_serial) out.gateway_serial = msg.gateway_serial;
+  for (const k of ['device_serial', 'gateway_serial']) {
+    const v = msg[k];
+    // "<Missing Scanner Serial Number Data>" is what INSIGHT Mobile puts in
+    // device_serial when no scanner is connected (observed 2026-09-24).
+    if (typeof v === 'string' && v.trim() && !/^<.*>$/.test(v.trim()) && !/missing/i.test(v)) out[k] = v.trim();
+  }
   return out;
 }
 

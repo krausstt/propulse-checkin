@@ -10,11 +10,12 @@
  *
  *   pg_work4_t4   4 cells. ID / Host / Badge Location / Full Name.
  *                 Carries forced_orientation: "LANDSCAPE".
- *   pg_work5_t3   5 cells. Adds Company, and moves the highlight off the name
- *                 onto Company. Carries NO forced_orientation at all.
+ *   pg_work5_t3   5 cells. Adds Company. Carries NO forced_orientation at all.
+ *                 Cell states follow Tobias's spec of 2026-09-23 (see below),
+ *                 which supersedes the states in the original capture.
  *
- * Both captures are asserted by deep-equal in mai.test.js. Neither is "the old
- * one" - they are two templates that exist, and the app picks. Do not collapse
+ * Both are asserted by deep-equal in mai.test.js. Neither is "the old one" -
+ * they are two templates that exist, and the app picks. Do not collapse
  * them into one until a capture proves they are the same thing.
  */
 
@@ -62,6 +63,12 @@ function makeField(limits) {
 
 /** The one visual emphasis the template allows. Exactly one cell gets it. */
 const FOCUSED = { type: 'FOCUSED', highlighted: true };
+/** Same state type, without the emphasis. */
+const FOCUSED_QUIET = { type: 'FOCUSED', highlighted: false };
+/** UNVERIFIED on the device: no capture has shown INSIGHT Mobile a SUCCESS
+ *  state yet (both captures only use FOCUSED). If the MAI rejects this command,
+ *  this constant is the first suspect. */
+const ID_OK = { type: 'SUCCESS', highlighted: false };
 
 /**
  * @param {object} p
@@ -103,16 +110,24 @@ export function buildDisplayCommand({
     template === 'pg_work5_t3'
       ? {
           title: clip(title, limits.title),
-          field_top_left: field('field_top_left_ref', 'ID', id),
-          field_top_right: field('field_top_right_ref', 'Badge Location', found ? visitor.badge_location : '—'),
-          field_middle_left: field('field_middle_left_ref', 'Host', found ? formatHost(visitor.host) : '—'),
-          field_middle_right: field(
-            'field_middle_right_ref',
-            'Company',
-            found ? visitor.company : '—',
-            FOCUSED
+          // Cell states for pg_work5_t3, as specified by Tobias on 2026-09-23:
+          //   ID              SUCCESS, not highlighted  (only when the badge matched)
+          //   Badge Location  FOCUSED, not highlighted
+          //   Full Name       FOCUSED, highlighted      (the one emphasised cell)
+          //   Host, Company   no state
+          // A SUCCESS on "Not Registered" would tell the greeter the opposite of
+          // the truth, so a miss sends the ID cell without a state rather than
+          // inventing an error type no capture has shown the device accepting.
+          field_top_left: field('field_top_left_ref', 'ID', id, found ? ID_OK : undefined),
+          field_top_right: field(
+            'field_top_right_ref',
+            'Badge Location',
+            found ? visitor.badge_location : '—',
+            FOCUSED_QUIET
           ),
-          field_bottom: field('field_bottom_ref', nameHeader, nameValue),
+          field_middle_left: field('field_middle_left_ref', 'Host', found ? formatHost(visitor.host) : '—'),
+          field_middle_right: field('field_middle_right_ref', 'Company', found ? visitor.company : '—'),
+          field_bottom: field('field_bottom_ref', nameHeader, nameValue, FOCUSED),
         }
       : {
           title: clip(title, limits.title),

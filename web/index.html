@@ -80,6 +80,7 @@
 <div class="card">
   <h2>Scanner link</h2>
   <div id="link"><div id="dot"></div><div><div id="linkText">Not connected</div><div id="linkDetail">Tap to connect</div></div></div>
+  <div id="insightErr" hidden style="margin-top:8px;padding:9px 10px;border-radius:9px;background:#3a1f22;border:1px solid #5b2f36;color:#fca5a5;font-size:13px"></div>
   <button id="bConnect" class="primary">Connect scanner</button>
   <button id="bDisconnect" class="ghost" hidden>Disconnect</button>
 </div>
@@ -117,6 +118,18 @@
 <details>
   <summary>Diagnostics</summary>
   <div class="card" style="margin-top:8px">
+    <h2>MAI test (sends synthetic sample text only)</h2>
+    <div id="serials" style="font:11.5px/1.5 ui-monospace,Consolas,monospace;color:var(--dim);margin-bottom:6px"></div>
+    <label class="sel" for="ack">Ask INSIGHT Mobile to acknowledge</label>
+    <select id="ack">
+      <option value="ON_HANDLED">ack_required: ON_HANDLED</option>
+      <option value="ON_RECEIVE">ack_required: ON_RECEIVE</option>
+      <option value="">no ack (exactly like the captures)</option>
+    </select>
+    <div id="probes"></div>
+    <div style="color:var(--dim);font-size:12px;margin-top:6px">Try top to bottom. The first one that changes the MAI tells us where the fault is. Then Copy log.</div>
+  </div>
+  <div class="card">
     <div id="env" style="font:11px/1.5 ui-monospace,Consolas,monospace;color:var(--dim);word-break:break-all;margin-bottom:8px"></div>
     <div id="log"></div>
     <div class="row">

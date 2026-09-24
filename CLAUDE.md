@@ -82,6 +82,28 @@ private ranges), and a separate `LoopbackNetworkAccessAllowedForUrls` policy may
 exist alongside `LocalNetworkAccessAllowedForUrls`. `LocalNetworkAccess
 RestrictionsTemporaryOptOut` is removed in Chrome 156, so it is not a plan.
 
+### First hardware run (2026-09-24, Tobias, Android 10, Chrome 153, github.io origin)
+
+Primary evidence, from the device logs:
+
+- **The loopback link works.** `ws://localhost:9998` opened from the HTTPS
+  Pages origin in 31 ms to 1.1 s, and INSIGHT Mobile answered commands on the
+  same socket. The LNA gate did **not** hard-fail.
+- **A connect with NO user gesture (`?auto=1`) succeeded** on an origin that had
+  connected before. So after a first grant, automatic reconnects work. Whether
+  a *fresh* origin prompts on Android was not observed and stays open.
+- **INSIGHT Mobile replied `ERROR_DEVICE_NOT_FOUND` "No connected device found"
+  with `device_serial: "<Missing Scanner Serial Number Data>"`**: INSIGHT Mobile
+  itself had no scanner connected, although the MAI showed "Connected to
+  Bluetooth". No `scan` event arrived on the socket at all.
+- Error frames carry `event_reference_id` (our command's `event_id`),
+  `error_code`, `error_message`, `error_severity`, and a *placeholder* in
+  `device_serial`. Never learn serials from error frames; learn them from
+  `scan` events only.
+- The resume-after-zombie path opened a second live socket (async `close()`
+  race). Fixed: every socket handler checks it still belongs to the current
+  socket.
+
 ### Unresolved, and gating
 
 `web/lna-test.html` exists to settle these on real hardware. Until it is run,
@@ -142,17 +164,22 @@ See `docs/data-flow.md` for the full path and every place a name exists.
 
 ## Ground truth
 
-`web/src/mai.test.js` holds TWO captured `display_v2!` payloads from the
-customer's own INSIGHT Mobile install, each asserted by deep-equal. **Those
-captures are the spec.** If a change breaks either test, the change is wrong.
+`web/src/mai.test.js` holds TWO `display_v2!` payloads, each asserted by
+deep-equal: the captured `pg_work4_t4`, and the captured `pg_work5_t3`
+structure with Tobias's cell states. **Those tests are the spec.** If a change breaks either test, the change is wrong.
 
 - Template `pg_work4_t4`: `field_top_left` (ID), `field_top_right` (Host),
   `field_middle_left` (Badge Location), `field_bottom` (Full Name, highlighted),
   plus `title`. No `field_middle_right`. Carries `forced_orientation`.
 - Template `pg_work5_t3`: `field_top_left` (ID), `field_top_right` (Badge
-  Location), `field_middle_left` (Host), `field_middle_right` (**Company**,
-  highlighted), `field_bottom` (Full Name, not highlighted), plus `title`.
-  Carries **no** `forced_orientation` key at all.
+  Location), `field_middle_left` (Host), `field_middle_right` (Company),
+  `field_bottom` (Full Name), plus `title`. Carries **no** `forced_orientation`
+  key at all. **Cell states (Tobias, 2026-09-23, supersede the capture's):**
+  Full Name `FOCUSED` highlighted; ID `SUCCESS` not highlighted (matched badge
+  only, omitted on a miss); Badge Location `FOCUSED` not highlighted; Host and
+  Company no state. `SUCCESS` has **not yet been seen accepted by a device**:
+  both captures only ever used `FOCUSED`. If the MAI rejects the command, check
+  that first.
 
 These two are not old and new. They are two templates that both exist, they
 order their cells differently, and they put the highlight on different cells.
@@ -165,6 +192,16 @@ other without a capture that proves they are the same thing.
   the device has never been observed to receive is how a working template turns
   into an unexplained rejection at the booth.
 - INSIGHT Mobile's command queue is only **5 deep** — debounce display sends.
+- Streams API 3.6.6 (summary supplied by Tobias, 2026-09-23; itself AI-written,
+  so second-grade): inbound `scan` carries `scan_code`, optional
+  `scan_data_base64`, `device_serial`, optional `gateway_serial`. Commands may
+  carry `ack_required: ON_RECEIVE | ON_HANDLED`. Its `display_v2!` example uses
+  a `workflow`/`fields` shape for MARK Display; the captures from the customer's
+  INSIGHT install use `pg_work*` templates, and the captures win.
+- "The MAI does not change" is bisected on the device with Diagnostics → MAI
+  test (`web/src/diag.js`): feedback! first (no template), then each capture,
+  then the app payload, each with an ack. Do not rewrite the display command
+  on a guess before those results exist.
 
 ---
 

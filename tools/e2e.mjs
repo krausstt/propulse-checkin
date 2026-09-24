@@ -112,7 +112,10 @@ try {
   check('uses the template the UI selected', /template=pg_work5_t3/.test(mockOut));
   check('pg_work5_t3 sends no forced_orientation', /forced_orientation=\(absent\)/.test(mockOut));
   check('device_serial was learned from the scan, not hardcoded', /device=MAIXBEU011089/.test(mockOut));
-  check('Company cell is the highlighted one', /field_middle_right.*HIGHLIGHTED/.test(mockOut));
+  check('full name is FOCUSED and highlighted', /field_bottom.*<-- FOCUSED HIGHLIGHTED/.test(mockOut));
+  check('ID is SUCCESS, not highlighted', /field_top_left.*<-- SUCCESS$/m.test(mockOut));
+  check('badge location is FOCUSED, not highlighted', /field_top_right.*<-- FOCUSED$/m.test(mockOut));
+  check('company carries no state', /field_middle_right[^\n]*Inc$/m.test(mockOut));
   check('full name is in field_bottom', /field_bottom\s+Full Name of Visitor\s+Nolan Wong/.test(mockOut));
 
   console.log('\nCHECK-IN');
@@ -153,6 +156,35 @@ try {
   await until('counters restored', async () => (await page.textContent('#nTotal')) === total);
   check('check-ins survive a reload', true);
   check('the socket does not silently reconnect after reload', (await page.textContent('#linkText')).includes('connect'));
+
+  console.log('\nSIMULATE after reload (serials must be remembered)');
+  const displaysBefore = (mockOut.match(/display_v2!/g) || []).length;
+  await page.click('#bConnect');
+  await until('socket open again', async () => (await page.textContent('#linkText')) === 'Scanner connected');
+  console.log('\nINSIGHT reports no scanner (frame captured on hardware)');
+  const serialsBefore = await page.evaluate(() => localStorage.getItem('serials'));
+  sendScan('noscanner');
+  await until('error banner', async () => /ERROR_DEVICE_NOT_FOUND/.test(await page.textContent('#insightErr')));
+  check('INSIGHT error is shown on the main screen', await page.isVisible('#insightErr'));
+  check('it tells the user to pair in INSIGHT Mobile', /pair the MAI/i.test(await page.textContent('#insightErr')));
+  check('the placeholder serial is NOT learned', (await page.evaluate(() => localStorage.getItem('serials'))) === serialsBefore);
+
+  await page.click('#bSim');
+  await until('simulated display reached the mock', () => (mockOut.match(/display_v2!/g) || []).length > displaysBefore);
+  check('Simulate scan reaches the MAI without a fresh real scan', true);
+
+  console.log('\nMAI PROBES');
+  await page.evaluate(() => { document.querySelector('details').open = true; });
+  for (const [label, expect] of [
+    ['Feedback beep (no display)', /<- feedback!/],
+    ['Capture pg_work4_t4, verbatim', /template=pg_work4_t4/],
+    ['Capture pg_work5_t3, original states', /field_middle_right.*<-- FOCUSED HIGHLIGHTED/],
+  ]) {
+    await page.click(`#probes button:has-text("${label}")`);
+    await until(label, () => expect.test(mockOut));
+    check(`probe sent: ${label}`, true);
+  }
+  check('probes ask for an ack by default', /ack_required=ON_HANDLED/.test(mockOut), 'mock did not see ack_required');
 
   check('no uncaught page errors', pageErrors.length === 0, pageErrors.join(' | '));
 } catch (e) {

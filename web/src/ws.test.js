@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  ScannerLink, backoffDelay, mayAutoConnect, redactDisplayText,
+  ScannerLink, backoffDelay, mayAutoConnect, redactDisplayText, adviceFor, isPlaceholderSerial,
   BACKOFF, AUTO_ATTEMPT_LIMIT, ZOMBIE_GAP_MS, SEND_INTERVAL_MS,
 } from './ws.js';
 
@@ -280,9 +280,72 @@ test('an error frame echoing a display command never puts the name in the log', 
     event_type: 'errors',
     errors: [{ message: 'bad cell', command: { field_bottom: { text_header: 'Full Name of Visitor', text_content: 'Nolan Wong' } } }],
   }));
-  const line = logs.find(m => /reported errors/.test(m));
+  const line = logs.find(m => /INSIGHT Mobile ERROR/.test(m));
   assert.ok(line);
   assert.doesNotMatch(line, /Nolan/);
   assert.match(line, /Full Name of Visitor/, 'the header survives, so the error is still readable');
   assert.equal(redactDisplayText({ title: 'x', text_content: 'y' }), '{"title":"[redacted]","text_content":"[redacted]"}');
+});
+
+// --- regressions from the first hardware run (2026-09-24) -------------------
+
+test('a zombie whose close arrives late does not orphan the new socket or spawn a third', () => {
+  // On Android, close() is asynchronous. The log showed: CLOSE, OPEN, then an
+  // extra "connecting (auto retry 0)" and a second OPEN - two live sockets.
+  const { link, advance, sockets } = harness();
+  link.connectFromUserGesture();
+  sockets[0]._open();
+  // Make close() asynchronous, like the browser.
+  sockets[0].close = function () { this.readyState = 2; };
+  advance(ZOMBIE_GAP_MS + 1000);
+  link.resume('visibilitychange');
+  assert.equal(sockets.length, 2);
+  sockets[1]._open();
+  // Now the zombie's close event finally lands.
+  sockets[0].readyState = 3;
+  sockets[0].onclose?.({ code: 1000, wasClean: true });
+  advance(60_000);
+  assert.equal(sockets.length, 2, 'no third socket');
+  assert.equal(link.ws, sockets[1], 'the live socket is still the current one');
+  assert.equal(link.state, 'open');
+});
+
+test('frames from a replaced socket are ignored', () => {
+  const { link, advance, sockets } = harness();
+  const scans = [];
+  link.on('scan', f => scans.push(f.code));
+  link.connectFromUserGesture();
+  sockets[0]._open();
+  sockets[0].close = function () { this.readyState = 2; };
+  advance(ZOMBIE_GAP_MS + 1000);
+  link.resume('visibilitychange');
+  sockets[1]._open();
+  sockets[0]._message(scanFrame('1'));   // stale socket
+  sockets[1]._message(scanFrame('2'));   // live socket
+  assert.deepEqual(scans, ['2'], 'a scan must never be handled twice');
+});
+
+test('the placeholder serial in an error frame is never learned', () => {
+  const { link, sockets } = harness();
+  const errors = [];
+  link.on('insight-error', e => errors.push(e));
+  link.connectFromUserGesture();
+  sockets[0]._open();
+  sockets[0]._message(JSON.stringify({
+    event_type: 'errors', api_version: '1.0', event_reference_id: 'cmd-1',
+    error_severity: 'ERROR', error_message: 'No connected device found', error_code: 'ERROR_DEVICE_NOT_FOUND',
+    device_serial: '<Missing Scanner Serial Number Data>', gateway_serial: '7a1b2f07-4025-47a1-a4ce-07803e059110',
+  }));
+  assert.deepEqual(link.serials, {}, 'nothing learned from an error frame');
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0].code, 'ERROR_DEVICE_NOT_FOUND');
+  assert.match(errors[0].advice, /NO scanner connected/);
+});
+
+test('error advice distinguishes no scanner from wrong serial', () => {
+  assert.match(adviceFor('ERROR_DEVICE_NOT_FOUND', { device_serial: '<Missing Scanner Serial Number Data>' }), /NO scanner/);
+  assert.match(adviceFor('ERROR_DEVICE_NOT_FOUND', { device_serial: 'MAIXBEU011089' }), /serial we addressed/);
+  assert.equal(adviceFor('SOMETHING_ELSE'), '');
+  assert.equal(isPlaceholderSerial('<Missing Scanner Serial Number Data>'), true);
+  assert.equal(isPlaceholderSerial('MAIXBEU011089'), false);
 });
