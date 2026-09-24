@@ -97,6 +97,8 @@
     <div class="pill"><b id="nSynced">0</b><span>Synced</span></div>
     <div class="pill" id="pPending"><b id="nPending">0</b><span>Unsynced</span></div>
   </div>
+  <button id="bExport" class="primary" style="margin-top:8px">Export attendance</button>
+  <div id="exportInfo" style="font-size:12px;margin:2px 0 4px"></div>
   <button id="bSync" class="ghost">Sync now</button>
 </div>
 
@@ -109,10 +111,12 @@
     <option value="pg_work4_t4">pg_work4_t4 — 4 cells, no Company</option>
   </select>
   <div class="row">
-    <button class="ghost" id="bLoad">Load roster file</button>
+    <button class="ghost" id="bLoad">Import registrant CSV</button>
     <button class="ghost" id="bSim">Simulate scan</button>
   </div>
-  <input type="file" id="fRoster" accept="application/json,.json">
+  <!-- No accept filter: Android's picker greys out CSVs whose MIME type it
+       guesses wrong. The app decides by content instead. -->
+  <input type="file" id="fRoster">
 </div>
 
 <details>

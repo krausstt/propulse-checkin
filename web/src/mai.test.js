@@ -144,15 +144,15 @@ const GOLDEN_T3 = {
           ref_id: 'field_top_left_ref',
           state: { type: 'SUCCESS', highlighted: false },
         },
-        field_top_right: {
+        field_top_right: { text_header: 'Host', text_content: 'Rohan', ref_id: 'field_top_right_ref' },
+        field_middle_left: {
           text_header: 'Badge Location',
           text_content: 'B-12',
-          ref_id: 'field_top_right_ref',
+          ref_id: 'field_middle_left_ref',
           state: { type: 'FOCUSED', highlighted: false },
         },
-        field_middle_left: { text_header: 'Host', text_content: 'Rohan', ref_id: 'field_middle_left_ref' },
         field_middle_right: {
-          text_header: 'Company',
+          text_header: 'Company Name',
           text_content: 'Anonymized Information Technology Inc',
           ref_id: 'field_middle_right_ref',
         },
@@ -203,9 +203,11 @@ test('pg_work5_t3 highlights the name, marks ID success and badge location focus
   const t3 = buildDisplayCommand({ id: '1', visitor: NOLAN_T3, ...baseT3 }).screen_views[0].pg_work5_t3;
   assert.deepEqual(t3.field_bottom.state, { type: 'FOCUSED', highlighted: true });
   assert.deepEqual(t3.field_top_left.state, { type: 'SUCCESS', highlighted: false });
-  assert.deepEqual(t3.field_top_right.state, { type: 'FOCUSED', highlighted: false });
+  assert.deepEqual(t3.field_middle_left.state, { type: 'FOCUSED', highlighted: false });
+  assert.equal(t3.field_middle_left.text_header, 'Badge Location');
   assert.equal('state' in t3.field_middle_right, false, 'Company carries no state');
-  assert.equal('state' in t3.field_middle_left, false, 'Host carries no state');
+  assert.equal('state' in t3.field_top_right, false, 'Host carries no state');
+  assert.equal(t3.field_top_right.text_header, 'Host');
 
   const highlighted = Object.values(t3).filter(c => c?.state?.highlighted);
   assert.equal(highlighted.length, 1, 'exactly one cell is emphasised');

@@ -18,7 +18,7 @@
  * venue WiFi went sideways.
  */
 
-const VERSION = 'v3';
+const VERSION = 'v4';
 const CACHE = `propulse-shell-${VERSION}`;
 
 const SHELL = [
@@ -35,6 +35,7 @@ const SHELL = [
   'src/outbox.js',
   'src/idb.js',
   'src/diag.js',
+  'src/csv-roster.js',
 ];
 
 self.addEventListener('install', event => {

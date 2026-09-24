@@ -158,3 +158,24 @@ export function outboxStats(records, now) {
 
   return { pending, sent, oldestPendingMs, stuck };
 }
+
+// --- attendance export ---------------------------------------------------
+
+/** Columns of the per-phone attendance export. No name, no company: this file
+ *  is safe to send over Teams or e-mail, and it is joined with the registrant
+ *  export only on the laptop, by tools/merge-attendance.mjs. */
+export const ATTENDANCE_COLUMNS = ['propulse_id', 'scanned_at', 'device_id', 'matched', 'idempotency_key'];
+
+/**
+ * Every check-in on this phone as CSV, oldest first.
+ *
+ * Deliberately every check-in, not one row per visitor: deduplication happens
+ * once, on the laptop, across all phones. Doing it here would hide a phone
+ * whose clock was wrong, or a visitor scanned at two booths.
+ */
+export function toAttendanceCsv(records) {
+  const rows = [...records]
+    .sort((a, b) => a.scanned_at.localeCompare(b.scanned_at))
+    .map(r => [r.propulse_id, r.scanned_at, r.device_id, r.matched ? 'yes' : 'no', r.idempotency_key]);
+  return [ATTENDANCE_COLUMNS, ...rows].map(r => r.join(',')).join('\r\n') + '\r\n';
+}

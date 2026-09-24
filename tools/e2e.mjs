@@ -82,7 +82,7 @@ await until('mock listening', () => mockOut.includes('stand-in on ws://'));
 const require = createRequire('/opt/node22/lib/node_modules/');
 const { chromium } = require('playwright');
 const browser = await chromium.launch({ headless: !process.argv.includes('--headed') });
-const page = await browser.newPage();
+const page = await browser.newPage({ acceptDownloads: true });
 const pageErrors = [];
 page.on('pageerror', e => pageErrors.push(e.message));
 
@@ -114,8 +114,9 @@ try {
   check('device_serial was learned from the scan, not hardcoded', /device=MAIXBEU011089/.test(mockOut));
   check('full name is FOCUSED and highlighted', /field_bottom.*<-- FOCUSED HIGHLIGHTED/.test(mockOut));
   check('ID is SUCCESS, not highlighted', /field_top_left.*<-- SUCCESS$/m.test(mockOut));
-  check('badge location is FOCUSED, not highlighted', /field_top_right.*<-- FOCUSED$/m.test(mockOut));
-  check('company carries no state', /field_middle_right[^\n]*Inc$/m.test(mockOut));
+  check('badge location (middle left) is FOCUSED, not highlighted', /field_middle_left\s+Badge Location.*<-- FOCUSED$/m.test(mockOut));
+  check('host is top right, stateless', /field_top_right\s+Host\s+Rohan$/m.test(mockOut));
+  check('company carries no state', /field_middle_right\s+Company Name[^\n]*Inc$/m.test(mockOut));
   check('full name is in field_bottom', /field_bottom\s+Full Name of Visitor\s+Nolan Wong/.test(mockOut));
 
   console.log('\nCHECK-IN');
@@ -185,6 +186,39 @@ try {
     check(`probe sent: ${label}`, true);
   }
   check('probes ask for an ack by default', /ack_required=ON_HANDLED/.test(mockOut), 'mock did not see ack_required');
+
+  console.log('\nIMPORT the Excel CSV export on the phone');
+  const dialogs = [];
+  page.on('dialog', d => { dialogs.push(d.message()); d.accept(); });
+  // The real export's header (2026-09-24), synthetic values, German-Excel
+  // semicolons, and the re-export file name that used to be refused.
+  const H = ['Member Status','First Name','Last Name','Email','Title','State (text only)','Related Record Owner','Account Owner','Phone','Zip/Postal Code','City','Country (text only)','Company','Member Type','Register Type','Badge location','Propulse ID','Content QR Inhalt','C:\\Users\\someone\\QR Codes','Attented','Full Name'];
+  const row = (id, first, last, company, badge) => ['Registered', first, last, `${first.toLowerCase()}@example.com`, 'Engineer', '', 'Insight Web Portal Integration User', 'Ann Host', 'PHONENUMBER', '', '', 'Canada', company, 'Contact', '', badge, id, id, '', '#N/A', `${first} ${last}`];
+  const csvText = [H, row('41', 'Imported', 'Person', 'Csv Import GmbH', 'Z-9'), row('42', 'Second', 'Person', 'Other Co', 'Z-8')]
+    .map(r => r.join(';')).join('\r\n');
+  await page.setInputFiles('#fRoster', { name: 'EXCELNAME (1).csv', mimeType: 'text/csv', buffer: Buffer.from('\uFEFF' + csvText, 'utf8') });
+  await until('roster replaced', async () => /2<\/b> visitors · file: EXCELNAME \(1\)\.csv/.test(await page.innerHTML('#rosterText')));
+  check('a ".csv" named "EXCELNAME (1).csv" imports', true);
+  await until('delete reminder', () => dialogs.some(m => /DELETE the file/.test(m)));
+  check('the user is told to delete the file afterwards', true);
+  const stored = await page.evaluate(() => new Promise(res => {
+    const r = indexedDB.open('propulse-checkin'); r.onsuccess = () => {
+      const g = r.result.transaction('roster').objectStore('roster').get('current'); g.onsuccess = () => res(JSON.stringify(g.result));
+    };
+  }));
+  check('IndexedDB holds no e-mail, phone or title', !/@example|PHONENUMBER|Engineer|Canada/.test(stored));
+  const logText = await page.textContent('#log');
+  check('the import logs no names', !/Imported Person|Second Person|Csv Import/.test(logText));
+  sendScan('41');
+  await until('imported visitor greeted', async () => (await page.textContent('#gName')) === 'Imported Person');
+  check('a scan finds the imported visitor', /Csv Import GmbH/.test(await page.textContent('#gMeta')));
+
+  console.log('\nEXPORT attendance');
+  const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#bExport')]);
+  const exported = (await import('node:fs')).readFileSync(await dl.path(), 'utf8');
+  check('export is named per device', /^attendance-dev-[0-9a-f]{8}-.*\.csv$/.test(dl.suggestedFilename()), dl.suggestedFilename());
+  check('export contains the check-ins', /^41,/m.test(exported) && exported.startsWith('propulse_id,scanned_at,device_id,matched,idempotency_key'));
+  check('export contains no names', !/Imported|Person|Nolan|Maria/.test(exported));
 
   check('no uncaught page errors', pageErrors.length === 0, pageErrors.join(' | '));
 } catch (e) {

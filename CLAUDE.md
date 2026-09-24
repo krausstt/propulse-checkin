@@ -136,7 +136,7 @@ not the default. This is the contingency if test 1 comes back "hard fail".
 | App | Buildless PWA, plain ES modules, no bundler, no framework |
 | Hosting | GitHub Pages, **code only**. Custom ProGlove subdomain before the phones are provisioned (the LNA grant is per origin; `*.github.io` grants are void after a move) |
 | Backend | **None.** AWS (Lambda + DynamoDB) was dropped on 2026-09-23 |
-| Roster | Built on the laptop by `build-roster.mjs`, carried to each phone **by hand** via company OneDrive/Teams, loaded with *Load roster file*, held in IndexedDB |
+| Roster | The Excel CSV export, carried to each phone **by hand** via company OneDrive/Teams, imported and reduced on the phone (*Import registrant CSV*), held in IndexedDB. `roster.json` also accepted |
 | Check-ins | Append-only on the phone, client-generated UUID idempotency key. They carry **no name**: `{idempotency_key, propulse_id, device_id, scanned_at, matched}`. Held on device; the sync path is dormant unless `?api=` is set |
 
 **This repo and its Pages site are public.** Nothing with a real name may be
@@ -148,10 +148,25 @@ committed or published, ever. Two gates enforce it and neither may be relaxed:
    rosters, forbidden roster fields). CI runs it before every deploy. Run it
    yourself before every push: `npm run check-public`.
 
-The raw SharePoint export never leaves the laptop. What travels to the phones
-is the **reduced** `roster.json`, never the CSV: the phone app refuses `.csv`
-files and refuses any roster whose records carry a key outside
-`ALLOWED_FIELDS` in `web/src/roster.js`.
+**Changed 2026-09-24 (Tobias's decision):** the phones import the Excel CSV
+export **directly** (*Import registrant CSV*). So the full export, e-mail and
+phone included, now travels through OneDrive/Teams and sits in the phone's
+Downloads until deleted. What still holds: the phone reduces it **in memory**
+with `web/src/csv-roster.js` (the same code `tools/build-roster.mjs` uses), only
+`ALLOWED_FIELDS` reach IndexedDB, no import message or log line ever contains
+a cell value, and the app tells the user to delete the file afterwards.
+`roster.json` from `build-roster.mjs` remains the stricter alternative.
+
+**Attendance, the point of the app.** With no backend, each phone's check-in
+log *is* the database. *Export attendance* downloads a name-free CSV per phone;
+`tools/merge-attendance.mjs <registrants.csv> <attendance-*.csv...>` merges all
+phones on the laptop, deduplicated by idempotency key, into `attended.csv`
+(names; never commit). The list is complete **only if every phone is
+exported**; the merge report prints the device count to check that.
+
+**CI/CD (Tobias, 2026-09-24):** after every push to the working branch, open a
+PR into `main`, merge it once the PII guard passes, and confirm the Pages
+deploy. Standing authorisation; do not ask each time.
 
 The sample data is **pseudonymised, not merely synthetic**: row 1 was derived
 from a real record. Its name and company were replaced on 2026-09-23. The
@@ -171,15 +186,16 @@ structure with Tobias's cell states. **Those tests are the spec.** If a change b
 - Template `pg_work4_t4`: `field_top_left` (ID), `field_top_right` (Host),
   `field_middle_left` (Badge Location), `field_bottom` (Full Name, highlighted),
   plus `title`. No `field_middle_right`. Carries `forced_orientation`.
-- Template `pg_work5_t3`: `field_top_left` (ID), `field_top_right` (Badge
-  Location), `field_middle_left` (Host), `field_middle_right` (Company),
-  `field_bottom` (Full Name), plus `title`. Carries **no** `forced_orientation`
-  key at all. **Cell states (Tobias, 2026-09-23, supersede the capture's):**
-  Full Name `FOCUSED` highlighted; ID `SUCCESS` not highlighted (matched badge
-  only, omitted on a miss); Badge Location `FOCUSED` not highlighted; Host and
-  Company no state. `SUCCESS` has **not yet been seen accepted by a device**:
-  both captures only ever used `FOCUSED`. If the MAI rejects the command, check
-  that first.
+- Template `pg_work5_t3`, **layout and states per Tobias's JSON of
+  2026-09-24** (supersede the capture's): `field_top_left` ID (`SUCCESS`,
+  quiet; matched badge only, omitted on a miss), `field_top_right` Host (no
+  state), `field_middle_left` Badge Location (`FOCUSED`, quiet),
+  `field_middle_right` "Company Name" (no state), `field_bottom` Full Name
+  (`FOCUSED`, highlighted), plus `title`. Carries **no** `forced_orientation`.
+  Tobias's hand-written JSON said `pg_work4_t4` + LANDSCAPE; with five cells
+  that must be `pg_work5_t3`, and LANDSCAPE was left out because no
+  `pg_work5_t3` capture carries it. The Diagnostics probe "Capture pg_work5_t3"
+  still sends the ORIGINAL capture for bisection.
 
 These two are not old and new. They are two templates that both exist, they
 order their cells differently, and they put the highlight on different cells.
@@ -227,6 +243,7 @@ npm run mock                                         # stand-in for INSIGHT Mobi
 npm run serve                                        # static server for web/ (plain HTTP)
 npm run demo-roster                                  # rebuild the synthetic bundled roster
 npm run check-public                                 # content gate: run before every push
+npm run attendance -- <registrants.csv> <attendance-*.csv...>   # merge phone exports
 node tools/build-roster.mjs <in.csv> --out roster.json --strict
 node tools/build-roster.mjs data/sample/registrants.sample.csv --sample
 ```

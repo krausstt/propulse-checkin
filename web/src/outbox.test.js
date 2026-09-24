@@ -140,3 +140,19 @@ test('stats tell the technician how much data lives only on this phone', () => {
 test('an empty outbox reports cleanly', () => {
   assert.deepEqual(outboxStats([], T0), { pending: 0, sent: 0, oldestPendingMs: null, stuck: 0 });
 });
+
+import { toAttendanceCsv, ATTENDANCE_COLUMNS } from './outbox.js';
+
+test('the attendance export is complete, ordered and name-free', () => {
+  const recs = [
+    createCheckin({ ...base, id: '2', uuid: 'b', now: T0 + 1000, matched: true }),
+    createCheckin({ ...base, id: '1', uuid: 'a', now: T0, matched: true }),
+    createCheckin({ ...base, id: '999', uuid: 'c', now: T0 + 2000, matched: false }),
+  ];
+  const lines = toAttendanceCsv(recs).trim().split('\r\n');
+  assert.equal(lines[0], ATTENDANCE_COLUMNS.join(','));
+  assert.equal(lines.length, 4, 'every check-in, including the unmatched one');
+  assert.match(lines[1], /^1,2026-09-22T09:00:00.000Z,phone-07,yes,a$/);
+  assert.match(lines[3], /^999,.*,no,c$/);
+  assert.deepEqual(ATTENDANCE_COLUMNS.filter(c => /name|company|host|email|phone/.test(c)), []);
+});
