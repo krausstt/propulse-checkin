@@ -82,6 +82,28 @@ private ranges), and a separate `LoopbackNetworkAccessAllowedForUrls` policy may
 exist alongside `LocalNetworkAccessAllowedForUrls`. `LocalNetworkAccess
 RestrictionsTemporaryOptOut` is removed in Chrome 156, so it is not a plan.
 
+### First hardware run (2026-09-24, Tobias, Android 10, Chrome 153, github.io origin)
+
+Primary evidence, from the device logs:
+
+- **The loopback link works.** `ws://localhost:9998` opened from the HTTPS
+  Pages origin in 31 ms to 1.1 s, and INSIGHT Mobile answered commands on the
+  same socket. The LNA gate did **not** hard-fail.
+- **A connect with NO user gesture (`?auto=1`) succeeded** on an origin that had
+  connected before. So after a first grant, automatic reconnects work. Whether
+  a *fresh* origin prompts on Android was not observed and stays open.
+- **INSIGHT Mobile replied `ERROR_DEVICE_NOT_FOUND` "No connected device found"
+  with `device_serial: "<Missing Scanner Serial Number Data>"`**: INSIGHT Mobile
+  itself had no scanner connected, although the MAI showed "Connected to
+  Bluetooth". No `scan` event arrived on the socket at all.
+- Error frames carry `event_reference_id` (our command's `event_id`),
+  `error_code`, `error_message`, `error_severity`, and a *placeholder* in
+  `device_serial`. Never learn serials from error frames; learn them from
+  `scan` events only.
+- The resume-after-zombie path opened a second live socket (async `close()`
+  race). Fixed: every socket handler checks it still belongs to the current
+  socket.
+
 ### Unresolved, and gating
 
 `web/lna-test.html` exists to settle these on real hardware. Until it is run,

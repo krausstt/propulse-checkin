@@ -71,6 +71,26 @@ export function redactDisplayText(value) {
   return JSON.stringify(value, (k, v) => (k === 'text_content' || k === 'title' ? '[redacted]' : v));
 }
 
+/**
+ * What an INSIGHT Mobile error code means for the person holding the phone.
+ * Only codes actually observed on hardware get specific advice; anything else
+ * is passed through verbatim rather than guessed at.
+ */
+export function adviceFor(code, msg = {}) {
+  if (code === 'ERROR_DEVICE_NOT_FOUND') {
+    return isPlaceholderSerial(msg.device_serial)
+      ? 'INSIGHT Mobile reports NO scanner connected at all. Open INSIGHT Mobile and pair the MAI there (its own pairing barcode), not in Android Bluetooth settings.'
+      : 'INSIGHT Mobile has no connected scanner with the serial we addressed. Scan one badge so the app learns the right serial, or check the MAI is paired in INSIGHT Mobile.';
+  }
+  return '';
+}
+
+/** INSIGHT Mobile fills device_serial with a human-readable placeholder when it
+ *  has no scanner. Never treat such a value as a serial. */
+export function isPlaceholderSerial(v) {
+  return typeof v !== 'string' || !v.trim() || /^<.*>$/.test(v.trim()) || /missing/i.test(v);
+}
+
 export class ScannerLink {
   /**
    * @param {object} opts
@@ -117,7 +137,7 @@ export class ScannerLink {
     this._lastSentAt = 0;
 
     /** @type {{status:Function[], scan:Function[], log:Function[], serials:Function[]}} */
-    this._handlers = { status: [], scan: [], log: [], serials: [] };
+    this._handlers = { status: [], scan: [], log: [], serials: [], 'insight-error': [] };
   }
 
   on(event, fn) {
@@ -176,7 +196,18 @@ export class ScannerLink {
     }
     this.ws = ws;
 
+    // Every handler below checks that it still belongs to the CURRENT socket.
+    // On a phone, close() is asynchronous: when a resume replaces a zombie, the
+    // old socket's onclose fires after the new one is already connecting, and
+    // without this guard it nulled this.ws (orphaning the new socket) and
+    // booked a retry that opened a THIRD one. Seen on hardware 2026-09-24:
+    // "CLOSE ... OPEN ... connecting (auto retry 0) ... OPEN". Two live sockets
+    // means every scan handled twice and every display sent twice into a
+    // five-deep queue.
+    const current = () => this.ws === ws;
+
     ws.onopen = () => {
+      if (!current()) { try { ws.close(); } catch {} return; }
       this.everConnected = true;
       this.autoAttempts = 0;
       this.lastOpenAt = this._now();
@@ -186,16 +217,19 @@ export class ScannerLink {
     };
 
     ws.onmessage = ev => {
+      if (!current()) return;
       this.lastFrameAt = this._now();
       this._handleFrame(ev.data);
     };
 
     ws.onerror = () => {
+      if (!current()) return;
       // Deliberately vague, because the API is. Do not invent a cause.
       this._log('socket error (script cannot tell LNA-blocked from nothing-listening)', 'error');
     };
 
     ws.onclose = ev => {
+      if (!current()) return; // a socket we already replaced; not news
       const wasOpen = this.state === 'open';
       this.ws = null;
       this._log(`socket CLOSE code=${ev.code} clean=${ev.wasClean}`, wasOpen ? 'warn' : 'error');
@@ -243,8 +277,9 @@ export class ScannerLink {
     if (this.state === 'open' && gap > ZOMBIE_GAP_MS) {
       this._log(`resumed after ${Math.round(gap / 1000)}s - assuming the socket is a zombie`, 'warn');
       this._clearRetry();
-      try { this.ws?.close(); } catch {}
-      this.ws = null;
+      const zombie = this.ws;
+      this.ws = null; // first, so the zombie's late onclose is ignored
+      try { zombie?.close(); } catch {}
       this.autoAttempts = 0;
       this.connectIfAllowed(`${reason} (zombie)`);
       return;
@@ -258,8 +293,9 @@ export class ScannerLink {
   disconnect() {
     this.closedByUser = true;
     this._clearRetry();
-    try { this.ws?.close(); } catch {}
+    const old = this.ws;
     this.ws = null;
+    try { old?.close(); } catch {}
     this._setState('idle', 'disconnected by user');
   }
 
@@ -268,7 +304,12 @@ export class ScannerLink {
   _handleFrame(raw) {
     const frame = parseFrame(raw);
 
-    if (frame.serials && Object.keys(frame.serials).length) {
+    // Serials are learned from SCAN events only. INSIGHT Mobile's error frames
+    // carry device_serial too, but when no scanner is connected that value is
+    // the literal placeholder "<Missing Scanner Serial Number Data>" - learning
+    // from it (as lna-test.html did on 2026-09-24) addresses every later
+    // command to a device that does not exist.
+    if (frame.kind === 'scan' && frame.serials && Object.keys(frame.serials).length) {
       const { serials, changed } = mergeSerials(this.serials, frame.serials);
       if (changed) {
         this.serials = serials;
@@ -285,12 +326,20 @@ export class ScannerLink {
         }
         this._emit('scan', frame);
         return;
-      case 'error':
+      case 'error': {
         // An error frame may echo our display command back, and that command
         // carries a visitor's name and company. The log can be copied off the
         // phone (Copy log), so every displayed text is redacted before logging.
-        this._log(`INSIGHT Mobile reported errors: ${redactDisplayText(frame.errors)}`, 'error');
+        const e = frame.msg;
+        const code = e.error_code ?? '(no code)';
+        this._log(
+          `INSIGHT Mobile ERROR ${code}: ${e.error_message ?? ''}` +
+          `${e.event_reference_id ? ` (for command ${e.event_reference_id})` : ''} :: ${redactDisplayText(frame.errors)}`,
+          'error'
+        );
+        this._emit('insight-error', { code, message: e.error_message ?? '', advice: adviceFor(code, e), msg: e });
         return;
+      }
       case 'ack':
         this._log(`ACK from INSIGHT Mobile for ${frame.ackFor}: ${redactDisplayText(frame.msg)}`, 'ok');
         return;

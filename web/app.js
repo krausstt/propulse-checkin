@@ -27,7 +27,7 @@ const $ = id => document.getElementById(id);
 /** Shown in Diagnostics. The service worker serves the cached shell first and
  *  refreshes in the background, so the first load after a deploy still runs
  *  the previous build. If this tag is old, close and reopen the app once. */
-const BUILD = '2026-09-23.3 probes';
+const BUILD = '2026-09-24.1 hw-fixes';
 
 /**
  * Where check-ins go. Empty by design: there is no backend (AWS was dropped),
@@ -109,6 +109,14 @@ function renderSerials() {
     ? `MAI ${s.device_serial}${s.gateway_serial ? ` · gateway ${s.gateway_serial}` : ' · no gateway_serial seen'}`
     : 'no MAI serial yet: scan one real badge';
 }
+
+// INSIGHT Mobile's own errors, shown on the main screen rather than buried in
+// the log: "the MAI does not change" is exactly the symptom they explain.
+link.on('insight-error', e => {
+  $('insightErr').hidden = false;
+  $('insightErr').textContent = `INSIGHT Mobile: ${e.code}${e.message ? ` (${e.message})` : ''}. ${e.advice}`;
+});
+link.on('serials', () => { $('insightErr').hidden = true; });
 
 link.on('scan', frame => { onScan(frame).catch(e => log(`scan handling failed: ${e.message}`, 'error')); });
 

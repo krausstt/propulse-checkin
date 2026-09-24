@@ -120,8 +120,12 @@ export function decodeBase64Url(s) {
  */
 function readSerials(msg) {
   const out = {};
-  if (typeof msg.device_serial === 'string' && msg.device_serial) out.device_serial = msg.device_serial;
-  if (typeof msg.gateway_serial === 'string' && msg.gateway_serial) out.gateway_serial = msg.gateway_serial;
+  for (const k of ['device_serial', 'gateway_serial']) {
+    const v = msg[k];
+    // "<Missing Scanner Serial Number Data>" is what INSIGHT Mobile puts in
+    // device_serial when no scanner is connected (observed 2026-09-24).
+    if (typeof v === 'string' && v.trim() && !/^<.*>$/.test(v.trim()) && !/missing/i.test(v)) out[k] = v.trim();
+  }
   return out;
 }
 

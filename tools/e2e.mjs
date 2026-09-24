@@ -161,6 +161,14 @@ try {
   const displaysBefore = (mockOut.match(/display_v2!/g) || []).length;
   await page.click('#bConnect');
   await until('socket open again', async () => (await page.textContent('#linkText')) === 'Scanner connected');
+  console.log('\nINSIGHT reports no scanner (frame captured on hardware)');
+  const serialsBefore = await page.evaluate(() => localStorage.getItem('serials'));
+  sendScan('noscanner');
+  await until('error banner', async () => /ERROR_DEVICE_NOT_FOUND/.test(await page.textContent('#insightErr')));
+  check('INSIGHT error is shown on the main screen', await page.isVisible('#insightErr'));
+  check('it tells the user to pair in INSIGHT Mobile', /pair the MAI/i.test(await page.textContent('#insightErr')));
+  check('the placeholder serial is NOT learned', (await page.evaluate(() => localStorage.getItem('serials'))) === serialsBefore);
+
   await page.click('#bSim');
   await until('simulated display reached the mock', () => (mockOut.match(/display_v2!/g) || []).length > displaysBefore);
   check('Simulate scan reaches the MAI without a fresh real scan', true);
