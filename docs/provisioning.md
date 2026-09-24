@@ -33,6 +33,21 @@ no way back from inside the app. So provisioning is not "install the PWA", it is
    **Allow**. Then force-stop Chrome and tap Connect again to confirm the grant
    survived. Booth staff get the phones only after this.
 
+## INSIGHT Mobile, per phone (once)
+
+Source: an AI-written summary of the ProGlove docs (2026-09-24), not the docs
+themselves. Confirm against the INSIGHT Webportal when doing it.
+
+1. Grant INSIGHT Mobile Android's **Display over other apps** permission
+   (Android 10+), or it cannot show its connection barcodes.
+2. In the **INSIGHT Webportal → Configurations**, create an **Android**
+   configuration with integration path **Websocket**, port **9998**.
+3. **Scan that configuration's QR code with the MAI.**
+4. Connect the MAI to INSIGHT Mobile through INSIGHT Mobile's own flow, not
+   Android Bluetooth settings. INSIGHT Mobile must list the MAI as connected,
+   with a serial. If the web app shows `ERROR_DEVICE_NOT_FOUND` and "NO scanner
+   connected", this step is what is missing.
+
 ## Per phone, on the day
 
 - INSIGHT Mobile running, WebSocket integration enabled, port **9998**
