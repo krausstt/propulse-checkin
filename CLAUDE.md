@@ -198,6 +198,19 @@ other without a capture that proves they are the same thing.
   carry `ack_required: ON_RECEIVE | ON_HANDLED`. Its `display_v2!` example uses
   a `workflow`/`fields` shape for MARK Display; the captures from the customer's
   INSIGHT install use `pg_work*` templates, and the captures win.
+- Second summary (Tobias, 2026-09-24, also AI-written): state `type` may be
+  `FOCUSED`, `SUCCESS`, `WARNING`, `ERROR`, so `SUCCESS` is a documented value.
+  `text_header` <= 100 and `text_content` <= 200 chars are API limits; our
+  lower `LIMITS` in `mai.js` are legibility choices for the 2in screen, not API
+  limits. Inbound `display_v2` (no `!`) events report MAI touch/timer events
+  with `screen_event` and `screen_context`. Its sample controller learns
+  `device_serial` from EVERY inbound message, errors included: that is the
+  exact bug the hardware run exposed. Do not copy it.
+- INSIGHT Mobile setup (same summary): the WebSocket integration is created as
+  an Android configuration in the INSIGHT Webportal (integration path
+  Websocket, port 9998) and applied by scanning its configuration QR code with
+  the MAI. INSIGHT Mobile needs Android's "Display over other apps" permission
+  to show connection barcodes on Android 10+.
 - "The MAI does not change" is bisected on the device with Diagnostics → MAI
   test (`web/src/diag.js`): feedback! first (no template), then each capture,
   then the app payload, each with an ack. Do not rewrite the display command
