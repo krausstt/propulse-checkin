@@ -135,9 +135,9 @@ not the default. This is the contingency if test 1 comes back "hard fail".
 |---|---|
 | App | Buildless PWA, plain ES modules, no bundler, no framework |
 | Hosting | GitHub Pages, **code only**. Custom ProGlove subdomain before the phones are provisioned (the LNA grant is per origin; `*.github.io` grants are void after a move) |
-| Backend | **None.** AWS (Lambda + DynamoDB) was dropped on 2026-09-23 |
+| Backend | **AWS, reinstated 2026-09-24 for the attendance record only**: CloudFormation `aws/template.yaml` → HTTP API (throttled, CORS to the Pages origin) → Lambda `aws/lambda.cjs` → DynamoDB `propulse-checkins` in `eu-central-1`. Tobias's private free-plan account. Receives exactly `idempotency_key, propulse_id, scanned_at, device_id` (+ server `received_at`); any fifth field rejects the request. Guide: `docs/aws-setup.md` |
 | Roster | The Excel CSV export, carried to each phone **by hand** via company OneDrive/Teams, imported and reduced on the phone (*Import registrant CSV*), held in IndexedDB. `roster.json` also accepted |
-| Check-ins | Append-only on the phone, client-generated UUID idempotency key. They carry **no name**: `{idempotency_key, propulse_id, device_id, scanned_at, matched}`. Held on device; the sync path is dormant unless `?api=` is set |
+| Check-ins | Append-only on the phone, client-generated UUID idempotency key, **no name**. Synced every 15 s when a setup link (`?api=…&key=…`) has been opened on the phone; only server-confirmed keys count as synced. The phone log stays the primary copy |
 
 **This repo and its Pages site are public.** Nothing with a real name may be
 committed or published, ever. Two gates enforce it and neither may be relaxed:
@@ -243,7 +243,8 @@ npm run mock                                         # stand-in for INSIGHT Mobi
 npm run serve                                        # static server for web/ (plain HTTP)
 npm run demo-roster                                  # rebuild the synthetic bundled roster
 npm run check-public                                 # content gate: run before every push
-npm run attendance -- <registrants.csv> <attendance-*.csv...>   # merge phone exports
+npm run attendance -- <registrants.csv> <attendance-*.csv...>   # merge phone/AWS exports
+npm run build-template                               # regenerate aws/template.yaml after editing aws/lambda.cjs
 node tools/build-roster.mjs <in.csv> --out roster.json --strict
 node tools/build-roster.mjs data/sample/registrants.sample.csv --sample
 ```
@@ -255,4 +256,8 @@ should not pull an npm tree nobody has audited. Keep it that way.
 
 Developed on Windows (PowerShell). A cloud session is Linux — adjust shell
 syntax, but nothing in the code is platform-specific. AWS CLI and SAM are
-**not** installed anywhere yet.
+**not** installed locally: the stack is deployed by uploading
+`aws/template.yaml` in the CloudFormation console, and data is exported from
+CloudShell. `aws/template.yaml` is generated; `aws/template.test.js` fails if
+it drifts from `aws/lambda.cjs` or the inline code exceeds 4096 characters.
+It passed `cfn-lint` 1.57.0 with no findings on 2026-09-24.

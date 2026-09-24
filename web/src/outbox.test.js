@@ -156,3 +156,12 @@ test('the attendance export is complete, ordered and name-free', () => {
   assert.match(lines[3], /^999,.*,no,c$/);
   assert.deepEqual(ATTENDANCE_COLUMNS.filter(c => /name|company|host|email|phone/.test(c)), []);
 });
+
+import { wireCheckin, WIRE_FIELDS } from './outbox.js';
+
+test('the wire format carries exactly the four identifiers the server accepts', () => {
+  const r = markFailed(createCheckin(base), { now: T0, error: 'x' });
+  const w = wireCheckin({ ...r, full_name: 'Nolan Wong', company: 'X' });
+  assert.deepEqual(Object.keys(w).sort(), [...WIRE_FIELDS].sort());
+  assert.equal(JSON.stringify(w).includes('Nolan'), false);
+});

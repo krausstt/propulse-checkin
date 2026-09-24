@@ -1,0 +1,141 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  ProPulse 2026 check-in store. Receives badge IDs, device IDs and timestamps
+  ONLY - no names, companies, e-mails or phone numbers. Generated from
+  aws/template.src.yaml + aws/lambda.cjs by tools/build-template.mjs.
+
+Parameters:
+  EventKey:
+    Type: String
+    NoEcho: true
+    MinLength: 24
+    AllowedPattern: '[A-Za-z0-9]+'
+    Description: >-
+      Shared key the phones send in the x-event-key header. Letters and digits
+      only, at least 24 characters. Keeps random internet traffic out; it is
+      not a password against someone holding an event phone.
+  AllowedOrigin:
+    Type: String
+    Default: https://krausstt.github.io
+    Description: The only website allowed to call the API (CORS). No trailing slash.
+
+Resources:
+  # One item per scan, keyed by the phone-generated idempotency key.
+  # Retained and deletion-protected: deleting the stack must never delete
+  # the attendance record. Point-in-time recovery covers operator mistakes.
+  CheckinTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: propulse-checkins
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: idempotency_key
+          AttributeType: S
+      KeySchema:
+        - AttributeName: idempotency_key
+          KeyType: HASH
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      DeletionProtectionEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+
+  # The function may write items and nothing else: no read, no delete, no scan.
+  FunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: put-checkins-only
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: dynamodb:PutItem
+                Resource: !GetAtt CheckinTable.Arn
+
+  CheckinFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: propulse-checkins
+      Runtime: nodejs22.x
+      Handler: index.handler
+      Role: !GetAtt FunctionRole.Arn
+      Timeout: 10
+      MemorySize: 256
+      Environment:
+        Variables:
+          TABLE: !Ref CheckinTable
+          EVENT_KEY: !Ref EventKey
+      Code:
+        ZipFile: |
+__LAMBDA_CODE__
+
+  FunctionLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/propulse-checkins
+      RetentionInDays: 30
+
+  HttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: propulse-checkins
+      ProtocolType: HTTP
+      CorsConfiguration:
+        AllowOrigins: [!Ref AllowedOrigin]
+        AllowMethods: [POST]
+        AllowHeaders: [content-type, x-event-key]
+        MaxAge: 3600
+
+  ApiIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt CheckinFunction.Arn
+      PayloadFormatVersion: '2.0'
+
+  ApiRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: POST /checkins
+      Target: !Sub integrations/${ApiIntegration}
+
+  # Throttled: 10 requests/s steady, 20 burst. Five phones need a fraction of
+  # that; anything above it is not the booth, and it caps the bill.
+  ApiStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref HttpApi
+      StageName: $default
+      AutoDeploy: true
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 20
+        ThrottlingRateLimit: 10
+
+  ApiInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref CheckinFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/*/checkins
+
+Outputs:
+  ApiUrl:
+    Description: Paste this into the phone setup link as ?api=
+    Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com
+  TableName:
+    Description: DynamoDB table holding the check-ins
+    Value: !Ref CheckinTable
