@@ -17,11 +17,14 @@ and nowhere else", with each boundary enforced by code rather than by memory.
 | 2 | Tobias's laptop, `data/registrants.csv` | same 21 columns | `.gitignore` (`*.csv`, `data/*`) |
 | 3 | `build-roster.mjs --strict`, on the laptop, no network | **e-mail, phone, address, title dropped here** | the script only copies 5 named columns |
 | 4 | `roster.json` on the laptop | id, full_name, host, badge_location, company, status | `.gitignore` (`roster.json`) |
-| 5 | Company OneDrive / Teams | `roster.json` only | M365 tenant; never the raw CSV |
-| 6 | Phone: OneDrive app → download → *Load roster file* | `roster.json` | app refuses `.csv`; refuses any record with a key outside `ALLOWED_FIELDS` |
+| 5 | Company OneDrive / Teams | **the full CSV export** (since 2026-09-24), or `roster.json` | M365 tenant |
+| 6 | Phone Downloads, until deleted | **the full CSV export**, e-mail and phone included | SureMDM device control; the app tells the user to delete it right after import |
+| 6b | Phone: *Import registrant CSV*, in memory | reduced to the 5 fields by `csv-roster.js` | no cell value is ever logged or shown in an error; only `ALLOWED_FIELDS` are stored |
 | 7 | Phone IndexedDB | the 5 fields | origin-scoped browser storage, no sync |
 | 8 | `display_v2!` → `ws://localhost:9998` → INSIGHT Mobile → BLE → MAI | one visitor's name, company, host, badge location | loopback only; **see open question A** |
 | 9 | Check-in record, phone IndexedDB | `idempotency_key, propulse_id, device_id, scanned_at, matched`, **no name** | `createCheckin` in `outbox.js` |
+| 10 | *Export attendance* CSV, per phone | the same five name-free columns | safe to send anywhere |
+| 11 | `attended.csv` on the laptop | names + attendance | built by `merge-attendance.mjs`; `*.csv` is git-ignored; keep in the tenant |
 
 ## What is public, and what guards it
 
@@ -39,9 +42,9 @@ field, and a denylist of strings known to be real.
 
 1. Export from SharePoint as **CSV UTF-8** into `data/` on the laptop.
 2. `node tools/build-roster.mjs data/registrants.csv --out roster.json --strict`
-3. Upload **`roster.json`**, never the CSV, to the event folder in OneDrive.
-4. On each phone: download, *Load roster file*, then **delete the file from
-   Downloads**.
+3. Upload the CSV (or, stricter, `roster.json`) to the event folder in OneDrive.
+4. On each phone: download, *Import registrant CSV*, then **delete the file
+   from Downloads**. It holds every registrant's e-mail and phone number.
 5. Delete the CSV from the laptop when the event is over.
 
 ## Never
@@ -68,9 +71,10 @@ field, and a denylist of strings known to be real.
   names leave the phone through our own product. Ask the INSIGHT Mobile team.
 - **B. Android backup.** Whether Chrome's IndexedDB is included in Google
   device backup is unverified. SureMDM can disable backup by policy; do that.
-- **C. Attendance export.** With no backend, check-ins stay on each phone.
-  They are name-free, so an end-of-day export (IDs + timestamps) is safe to
-  move anywhere, but it is not built yet.
+- **C. Attendance.** Built: *Export attendance* per phone, merged by
+  `tools/merge-attendance.mjs`. Complete only if every phone is exported;
+  storage persistence was reported `false` on the test phone, so Chrome may
+  evict IndexedDB under storage pressure. Export at least every break.
 - **D. Git history.** Before 2026-09-23 the sample carried the original
   pseudonym and a real-looking company name. They remain in public history
   unless history is rewritten.

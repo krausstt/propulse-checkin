@@ -17,9 +17,10 @@ import { buildDisplayCommand, parseScannedId } from './src/mai.js';
 import { ScannerLink } from './src/ws.js';
 import { indexVisitors, lookup, validateRoster, acceptReplacement } from './src/roster.js';
 import {
-  createCheckin, isDuplicateScan, dueForSend, markSent, markFailed, outboxStats,
+  createCheckin, isDuplicateScan, dueForSend, markSent, markFailed, outboxStats, toAttendanceCsv,
 } from './src/outbox.js';
 import { PROBES, withAck } from './src/diag.js';
+import { decodeCsvBytes, reduceExport, rosterPayload, checksumVisitors } from './src/csv-roster.js';
 import { openDb, loadRoster, saveRoster, putCheckin, putCheckins, allCheckins, requestPersistence } from './src/idb.js';
 
 const $ = id => document.getElementById(id);
@@ -27,7 +28,7 @@ const $ = id => document.getElementById(id);
 /** Shown in Diagnostics. The service worker serves the cached shell first and
  *  refreshes in the background, so the first load after a deploy still runs
  *  the previous build. If this tag is old, close and reopen the app once. */
-const BUILD = '2026-09-24.1 hw-fixes';
+const BUILD = '2026-09-24.2 csv-import attendance';
 
 /**
  * Where check-ins go. Empty by design: there is no backend (AWS was dropped),
@@ -196,7 +197,41 @@ const escapeHtml = s => String(s).replace(/[&<>"']/g, c =>
 
 // --- check-in sync -------------------------------------------------------
 
+// --- attendance export ---------------------------------------------------
+
+/**
+ * With no backend, this phone's check-in log IS the attendance database, and
+ * a lost or wiped phone loses it. So the number that matters on screen is how
+ * many check-ins exist only here, i.e. since the last export.
+ */
+function renderExport() {
+  const total = state.checkins.length;
+  let last = null;
+  try { last = JSON.parse(localStorage.getItem('lastExport') || 'null'); } catch {}
+  const since = total - (last?.count ?? 0);
+  $('bExport').textContent = `Export attendance (${total} check-ins, no names)`;
+  $('exportInfo').textContent = last
+    ? `Last export ${new Date(last.at).toLocaleString()} · ${since} check-in(s) since, only on this phone`
+    : `Never exported · all ${total} check-in(s) exist only on this phone`;
+  $('exportInfo').style.color = since > 0 ? 'var(--warn)' : 'var(--dim)';
+}
+
+$('bExport').onclick = () => {
+  const csvText = toAttendanceCsv(state.checkins);
+  const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csvText], { type: 'text/csv' }));
+  a.download = `attendance-${deviceId()}-${stamp}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  try { localStorage.setItem('lastExport', JSON.stringify({ at: Date.now(), count: state.checkins.length })); } catch {}
+  log(`attendance exported: ${state.checkins.length} check-ins -> ${a.download}`, 'ok');
+  renderExport();
+};
+
 function renderSync() {
+  renderExport();
   const s = outboxStats(state.checkins, Date.now());
   $('nTotal').textContent = s.pending + s.sent;
   $('nSynced').textContent = s.sent;
@@ -291,34 +326,70 @@ async function bootRoster() {
 
 $('fRoster').onchange = async ev => {
   const file = ev.target.files?.[0];
+  ev.target.value = '';
   if (!file) return;
-  // The raw SharePoint export is a CSV with e-mail and phone columns. It must
-  // never be loaded onto a phone, and the phone must not even parse it: parsing
-  // would put those values in memory and, on a bad day, in the log.
-  if (!/\.json$/i.test(file.name) || file.type === 'text/csv') {
-    log(`refused ${file.name}: phones only accept roster.json built by tools/build-roster.mjs, never the raw export`, 'error');
-    alert('This is not a roster file.\n\nLoad the roster.json produced by build-roster.mjs on the laptop. Never load the raw CSV export: it contains e-mail addresses and phone numbers.');
-    ev.target.value = '';
-    return;
-  }
   try {
-    const payload = JSON.parse(await file.text());
+    const result = await importRosterFile(file);
+    if (!result) return;
+    const { payload, summary } = result;
     const decision = acceptReplacement(state.rosterMeta, payload);
     if (!decision.accept && decision.errors.length) {
       log(`roster file rejected: ${decision.errors.join('; ')}`, 'error');
+      alert(`Roster not loaded:\n\n${decision.errors.join('\n')}`);
       return;
     }
     const meta = { fetched_at: new Date().toISOString() };
     if (await installRoster(payload, meta, `file: ${file.name}`)) {
       await saveRoster(payload, meta);
-      log(`roster replaced from ${file.name}`, 'ok');
+      log(`roster loaded from ${file.name}: ${summary}`, 'ok');
+      alert(
+        `Roster loaded: ${payload.count} visitors.\n${summary}\n\n` +
+        'Only name, host, badge location, company and status were kept on this phone.\n\n' +
+        'Now DELETE the file from Downloads: it still contains e-mail addresses and phone numbers.'
+      );
     }
-  } catch (e) {
-    log(`could not read roster file: ${e.message}`, 'error');
-  } finally {
-    ev.target.value = '';
+  } catch {
+    // Never log the exception text: Chrome's JSON.parse error quotes the first
+    // bytes of the file, which in a real export is a visitor's name.
+    log(`could not read ${file.name} as a roster (content not logged)`, 'error');
+    alert('Could not read this file as a roster. Export the sheet from Excel as "CSV UTF-8" and try again.');
   }
 };
+
+/**
+ * Accepts either the Excel CSV export or a roster.json, told apart by CONTENT,
+ * not by file name: a re-export arrives as "EXCELNAME (1).csv", and Android's
+ * file picker is inconsistent about MIME types for CSV.
+ *
+ * A CSV is reduced right here, in memory, by the same code build-roster.mjs
+ * uses. The full text (with e-mail and phone columns) is a local variable that
+ * goes out of scope when this returns; only the reduced payload is stored.
+ */
+async function importRosterFile(file) {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  if (bytes[0] === 0x50 && bytes[1] === 0x4b) {
+    // "PK": a zip container, i.e. .xlsx. Parsing that needs a library we refuse to ship.
+    alert('This is an Excel workbook (.xlsx). In Excel use File → Save As → "CSV UTF-8 (Comma delimited)" and load that.');
+    return null;
+  }
+  const { text, encoding } = decodeCsvBytes(bytes);
+  if (/^\s*\{/.test(text)) {
+    return { payload: JSON.parse(text), summary: 'roster.json' };
+  }
+  const r = reduceExport(text);
+  if (!r.ok) {
+    log(`CSV import failed: ${r.errors.join('; ')}`, 'error');
+    alert(`This CSV could not be imported:\n\n${r.errors.join('\n')}`);
+    return null;
+  }
+  for (const w of r.warnings) log(`import: ${w}`, 'warn');
+  const payload = rosterPayload({ visitors: r.visitors, sourceFile: file.name, generatedAt: new Date().toISOString() });
+  payload.checksum = await checksumVisitors(payload.visitors, crypto.subtle);
+  const summary = `${r.stats.rows} rows, ${r.stats.kept} kept, ${r.stats.skippedNoId} without ID, ` +
+    `${r.stats.duplicates} duplicate IDs, ${encoding}, delimiter ${JSON.stringify(r.delimiter)}` +
+    (r.warnings.length ? `, ${r.warnings.length} warning(s) in the log` : '');
+  return { payload, summary };
+}
 
 // --- controls ------------------------------------------------------------
 

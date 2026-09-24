@@ -110,23 +110,24 @@ export function buildDisplayCommand({
     template === 'pg_work5_t3'
       ? {
           title: clip(title, limits.title),
-          // Cell states for pg_work5_t3, as specified by Tobias on 2026-09-23:
-          //   ID              SUCCESS, not highlighted  (only when the badge matched)
-          //   Badge Location  FOCUSED, not highlighted
-          //   Full Name       FOCUSED, highlighted      (the one emphasised cell)
-          //   Host, Company   no state
+          // Layout and states for pg_work5_t3, as specified by Tobias on
+          // 2026-09-24 (hand-written JSON; supersedes the capture's layout):
+          //   top left      ID              SUCCESS, quiet  (matched badge only)
+          //   top right     Host            no state
+          //   middle left   Badge Location  FOCUSED, quiet
+          //   middle right  Company Name    no state
+          //   bottom        Full Name       FOCUSED, highlighted
           // A SUCCESS on "Not Registered" would tell the greeter the opposite of
-          // the truth, so a miss sends the ID cell without a state rather than
-          // inventing an error type no capture has shown the device accepting.
+          // the truth, so a miss sends the ID cell without a state.
           field_top_left: field('field_top_left_ref', 'ID', id, found ? ID_OK : undefined),
-          field_top_right: field(
-            'field_top_right_ref',
+          field_top_right: field('field_top_right_ref', 'Host', found ? formatHost(visitor.host) : '—'),
+          field_middle_left: field(
+            'field_middle_left_ref',
             'Badge Location',
             found ? visitor.badge_location : '—',
             FOCUSED_QUIET
           ),
-          field_middle_left: field('field_middle_left_ref', 'Host', found ? formatHost(visitor.host) : '—'),
-          field_middle_right: field('field_middle_right_ref', 'Company', found ? visitor.company : '—'),
+          field_middle_right: field('field_middle_right_ref', 'Company Name', found ? visitor.company : '—'),
           field_bottom: field('field_bottom_ref', nameHeader, nameValue, FOCUSED),
         }
       : {
