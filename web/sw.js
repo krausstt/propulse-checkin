@@ -18,7 +18,7 @@
  * venue WiFi went sideways.
  */
 
-const VERSION = 'v4';
+const VERSION = 'v5';
 const CACHE = `propulse-shell-${VERSION}`;
 
 const SHELL = [

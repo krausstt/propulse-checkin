@@ -179,3 +179,15 @@ export function toAttendanceCsv(records) {
     .map(r => [r.propulse_id, r.scanned_at, r.device_id, r.matched ? 'yes' : 'no', r.idempotency_key]);
   return [ATTENDANCE_COLUMNS, ...rows].map(r => r.join(',')).join('\r\n') + '\r\n';
 }
+
+// --- wire format -----------------------------------------------------------
+
+/**
+ * The ONLY shape of a check-in that ever leaves the phone: four identifiers,
+ * no name, no company, no delivery bookkeeping. aws/lambda.cjs rejects any
+ * request carrying a fifth key, so the two ends enforce the same rule.
+ */
+export const WIRE_FIELDS = ['device_id', 'idempotency_key', 'propulse_id', 'scanned_at'];
+export function wireCheckin(r) {
+  return { idempotency_key: r.idempotency_key, propulse_id: r.propulse_id, scanned_at: r.scanned_at, device_id: r.device_id };
+}

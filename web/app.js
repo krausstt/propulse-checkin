@@ -17,7 +17,7 @@ import { buildDisplayCommand, parseScannedId } from './src/mai.js';
 import { ScannerLink } from './src/ws.js';
 import { indexVisitors, lookup, validateRoster, acceptReplacement } from './src/roster.js';
 import {
-  createCheckin, isDuplicateScan, dueForSend, markSent, markFailed, outboxStats, toAttendanceCsv,
+  createCheckin, isDuplicateScan, dueForSend, markSent, markFailed, outboxStats, toAttendanceCsv, wireCheckin,
 } from './src/outbox.js';
 import { PROBES, withAck } from './src/diag.js';
 import { decodeCsvBytes, reduceExport, rosterPayload, checksumVisitors } from './src/csv-roster.js';
@@ -28,7 +28,7 @@ const $ = id => document.getElementById(id);
 /** Shown in Diagnostics. The service worker serves the cached shell first and
  *  refreshes in the background, so the first load after a deploy still runs
  *  the previous build. If this tag is old, close and reopen the app once. */
-const BUILD = '2026-09-24.2 csv-import attendance';
+const BUILD = '2026-09-24.3 aws-sync';
 
 /**
  * Where check-ins go. Empty by design: there is no backend (AWS was dropped),
@@ -37,12 +37,24 @@ const BUILD = '2026-09-24.2 csv-import attendance';
  * carries no name, so pointing ?api= at an endpoint later exposes only badge
  * IDs and timestamps.
  */
-const API_BASE = new URLSearchParams(location.search).get('api')
-  || localStorage.getItem('apiBase')
-  || '';
-if (new URLSearchParams(location.search).get('api')) {
-  localStorage.setItem('apiBase', new URLSearchParams(location.search).get('api'));
+const params = new URLSearchParams(location.search);
+/**
+ * One-time setup link per phone:  ...?api=https://<id>.execute-api...&key=<event key>
+ * Both are remembered on the phone and then removed from the address bar, so
+ * the key does not linger in the URL. Neither is ever committed: the repo is
+ * public, and the key is what keeps random traffic out of the table.
+ */
+for (const [param, store] of [['api', 'apiBase'], ['key', 'eventKey']]) {
+  const v = params.get(param);
+  if (v) { try { localStorage.setItem(store, v.trim()); } catch {} }
 }
+if (params.has('api') || params.has('key')) {
+  params.delete('api'); params.delete('key');
+  history.replaceState(null, '', location.pathname + (params.toString() ? `?${params}` : ''));
+}
+const API_BASE = (localStorage.getItem('apiBase') || '').replace(/\/$/, '');
+const EVENT_KEY = localStorage.getItem('eventKey') || '';
+
 
 /** One stable id per phone, so five SureMDM devices are distinguishable in the
  *  check-in log without anybody provisioning a config file per device. */
@@ -237,9 +249,9 @@ function renderSync() {
   $('nSynced').textContent = s.sent;
   $('nPending').textContent = s.pending;
   $('pPending').classList.toggle('warn', s.pending > 0);
-  $('bSync').textContent = API_BASE
-    ? (s.pending ? `Sync ${s.pending} now` : 'All synced')
-    : 'No server configured — held on device';
+  $('bSync').textContent = !API_BASE || !EVENT_KEY
+    ? 'No server configured — held on this phone only'
+    : (s.pending ? `Sync ${s.pending} now${s.stuck ? ` (${s.stuck} stuck)` : ''}` : 'All synced to server ✓');
 }
 
 /**
@@ -250,39 +262,49 @@ function renderSync() {
  * reassurance that gets discovered as false on the evening of day one.
  */
 async function sync(reason) {
-  if (!API_BASE || state.syncing) return;
+  if (!API_BASE || !EVENT_KEY || state.syncing || !navigator.onLine) return;
   const batch = dueForSend(state.checkins, Date.now());
   if (!batch.length) return;
 
   state.syncing = true;
+  const keys = new Set(batch.map(r => r.idempotency_key));
   try {
-    log(`syncing ${batch.length} check-in(s) (${reason})`);
-    const res = await fetch(`${API_BASE.replace(/\/$/, '')}/checkins`, {
+    const res = await fetch(`${API_BASE}/checkins`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ device_id: deviceId(), checkins: batch }),
+      headers: { 'content-type': 'application/json', 'x-event-key': EVENT_KEY },
+      body: JSON.stringify({ checkins: batch.map(wireCheckin) }),
     });
+    if (res.status === 401) {
+      $('insightErr').hidden = false;
+      $('insightErr').textContent = 'Check-in server refused the event key. Open the setup link for this phone again.';
+      throw new Error('HTTP 401 (event key)');
+    }
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const body = await res.json().catch(() => ({}));
-    // Trust the server's list if it sends one, otherwise assume the batch we
-    // sent. Either way the idempotency key means a replay is harmless.
-    const accepted = new Set(Array.isArray(body.accepted) ? body.accepted : batch.map(r => r.idempotency_key));
+    const body = await res.json();
+    // Only keys the server explicitly confirms are marked synced. Anything it
+    // did not confirm stays pending and is retried - never assumed delivered.
+    const accepted = new Set((Array.isArray(body.accepted) ? body.accepted : []).filter(k => keys.has(k)));
     const now = Date.now();
-    const updated = state.checkins.map(r => (accepted.has(r.idempotency_key) && r.status !== 'sent' ? markSent(r, now) : r));
-    await putCheckins(updated.filter(r => accepted.has(r.idempotency_key)));
-    state.checkins = updated;
-    log(`synced ${accepted.size} check-in(s)`, 'ok');
+    state.checkins = state.checkins.map(r => {
+      if (!keys.has(r.idempotency_key) || r.status === 'sent') return r;
+      return accepted.has(r.idempotency_key) ? markSent(r, now) : markFailed(r, { now, error: 'not confirmed by server' });
+    });
+    await putCheckins(state.checkins.filter(r => keys.has(r.idempotency_key)));
+    log(`synced ${accepted.size}/${batch.length} check-in(s) (${reason})`, accepted.size === batch.length ? 'ok' : 'warn');
   } catch (e) {
     const now = Date.now();
-    const keys = new Set(batch.map(r => r.idempotency_key));
-    state.checkins = state.checkins.map(r => (keys.has(r.idempotency_key) ? markFailed(r, { now, error: e.message }) : r));
+    state.checkins = state.checkins.map(r => (keys.has(r.idempotency_key) && r.status !== 'sent' ? markFailed(r, { now, error: e.message }) : r));
     await putCheckins(state.checkins.filter(r => keys.has(r.idempotency_key)));
-    log(`sync failed: ${e.message} - check-ins stay on the device and retry`, 'error');
+    log(`sync failed: ${e.message} - check-ins stay on the phone and retry`, 'error');
   } finally {
     state.syncing = false;
     renderSync();
   }
 }
+
+// Drain regularly, not only after a scan: a check-in recorded offline must
+// reach the table as soon as WiFi returns, even if nobody scans again.
+setInterval(() => sync('timer'), 15_000);
 
 // --- roster --------------------------------------------------------------
 
@@ -460,6 +482,7 @@ window.onunhandledrejection = e => log(`unhandled rejection: ${e.reason}`, 'erro
     `display   ${standalone ? 'installed PWA' : 'browser tab'}`,
     `device    ${deviceId()}`,
     `api       ${API_BASE || '(none - check-ins stay on this device)'}`,
+    `eventkey  ${EVENT_KEY ? `set (${EVENT_KEY.length} chars)` : 'not set'}`,
     `UA        ${navigator.userAgent}`,
   ].join('\n');
   log(`boot · ${standalone ? 'installed PWA' : 'browser tab'} · secureContext=${window.isSecureContext}`, 'dim');

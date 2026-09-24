@@ -53,7 +53,25 @@ async function until(label, fn, timeout = 8000) {
 }
 
 // --- static server (zero deps) -------------------------------------------
+// The check-in API, served by the REAL Lambda handler (aws/lambda.cjs) with an
+// in-memory table, so the phone -> HTTP -> Lambda -> table chain is tested.
+const { makeHandler } = createRequire(import.meta.url)('../aws/lambda.cjs');
+const E2E_KEY = 'e2e0key0e2e0key0e2e0key0';
+const table = new Map();
+const lambda = makeHandler({ put: async i => {
+  const k = i.Item.idempotency_key.S;
+  if (table.has(k)) throw Object.assign(new Error('exists'), { name: 'ConditionalCheckFailedException' });
+  table.set(k, i.Item);
+} }, { table: 'propulse-checkins', key: E2E_KEY });
+
 const site = createServer(async (req, res) => {
+  if (req.method === 'POST' && req.url === '/checkins') {
+    let body = '';
+    for await (const chunk of req) body += chunk;
+    const out = await lambda({ headers: { 'x-event-key': req.headers['x-event-key'] }, body });
+    res.writeHead(out.statusCode, out.headers); res.end(out.body);
+    return;
+  }
   const rel = normalize(decodeURIComponent(req.url.split('?')[0])).replace(/^(\.\.[/\\])+/, '');
   const path = join(WEB, rel === '/' ? 'index.html' : rel);
   try {
@@ -219,6 +237,23 @@ try {
   check('export is named per device', /^attendance-dev-[0-9a-f]{8}-.*\.csv$/.test(dl.suggestedFilename()), dl.suggestedFilename());
   check('export contains the check-ins', /^41,/m.test(exported) && exported.startsWith('propulse_id,scanned_at,device_id,matched,idempotency_key'));
   check('export contains no names', !/Imported|Person|Nolan|Maria/.test(exported));
+
+  console.log('\nSYNC to the check-in API (real Lambda code, in-memory table)');
+  const pendingBefore = Number(await page.textContent('#nPending'));
+  await page.goto(`http://127.0.0.1:${PORT}/index.html?api=http://127.0.0.1:${PORT}&key=${E2E_KEY}`);
+  check('the setup link is removed from the address bar', !/key=/.test(page.url()), page.url());
+  await until('everything synced', async () => (await page.textContent('#nPending')) === '0', 30000);
+  check(`all ${pendingBefore} pending check-ins reached the table`, table.size === pendingBefore, `${table.size} in table`);
+  const fields = new Set([...table.values()].flatMap(i => Object.keys(i)));
+  check('the table holds only the four identifiers + received_at',
+    [...fields].sort().join() === 'device_id,idempotency_key,propulse_id,received_at,scanned_at', [...fields].join());
+  check('no name ever reached the server', ![...table.values()].some(i => /Nolan|Imported|Person|Maria|Anonymized/.test(JSON.stringify(i))));
+  check('the UI says all synced', /All synced/.test(await page.textContent('#bSync')));
+  await page.click('#bConnect');
+  await until('socket open for sync test', async () => (await page.textContent('#linkText')) === 'Scanner connected');
+  sendScan('41');
+  await until('new scan synced', () => table.size === pendingBefore + 1, 30000);
+  check('a new scan syncs on its own', true);
 
   check('no uncaught page errors', pageErrors.length === 0, pageErrors.join(' | '));
 } catch (e) {

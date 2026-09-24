@@ -71,7 +71,7 @@ for (const id of walkIns.sort()) {
 writeFileSync(out, lines.map(r => r.map(q).join(',')).join('\r\n') + '\r\n', 'utf8');
 
 const attended = [...registrants.keys()].filter(id => first.has(id)).length;
-console.log(`\n  ${scanPaths.length} phone export(s), ${devices.size} distinct device(s), ${byKey.size} unique scans`);
+console.log(`\n  ${scanPaths.length} export file(s) (phones and/or AWS), ${devices.size} distinct device(s), ${byKey.size} unique scans`);
 console.log(`  ${attended} of ${registrants.size} registrants attended`);
 console.log(`  ${walkIns.length} scanned ID(s) not in the registrant export`);
 console.log(`  -> ${out}  (contains names: keep it in the M365 tenant, never commit it)\n`);

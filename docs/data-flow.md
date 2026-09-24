@@ -24,6 +24,7 @@ and nowhere else", with each boundary enforced by code rather than by memory.
 | 8 | `display_v2!` → `ws://localhost:9998` → INSIGHT Mobile → BLE → MAI | one visitor's name, company, host, badge location | loopback only; **see open question A** |
 | 9 | Check-in record, phone IndexedDB | `idempotency_key, propulse_id, device_id, scanned_at, matched`, **no name** | `createCheckin` in `outbox.js` |
 | 10 | *Export attendance* CSV, per phone | the same five name-free columns | safe to send anywhere |
+| 10b | AWS DynamoDB `propulse-checkins`, eu-central-1 | `idempotency_key, propulse_id, scanned_at, device_id, received_at` | `wireCheckin` on the phone sends only these; `aws/lambda.cjs` rejects any request with another field; IAM role can only PutItem |
 | 11 | `attended.csv` on the laptop | names + attendance | built by `merge-attendance.mjs`; `*.csv` is git-ignored; keep in the tenant |
 
 ## What is public, and what guards it

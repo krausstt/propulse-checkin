@@ -60,6 +60,9 @@ jobs:
       - name: Check the CONTENT of every tracked file, not just its name
         run: node tools/check-public.mjs
 
+      - name: AWS template matches the tested Lambda source
+        run: node tools/build-template.mjs --check
+
       - name: Unit tests
         run: npm test
 
