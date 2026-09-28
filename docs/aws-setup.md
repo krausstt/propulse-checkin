@@ -17,8 +17,8 @@ Each row contains `propulse_id`, `device_id`, `scanned_at`, `received_at` and
 `idempotency_key`. That is all: **no name, company, e-mail or phone ever
 arrives**. The Lambda refuses any request carrying a fifth field, and the phone
 never sends one. Badge IDs are still pseudonymous personal data under GDPR,
-because the Excel sheet maps them back to people. The table is in Frankfurt
-(`eu-central-1`) and encrypted at rest. Whether a private AWS account may hold
+because the Excel sheet maps them back to people. The table is in an EU region
+(the first deployment is in `eu-north-1`, Stockholm) and encrypted at rest. Whether a private AWS account may hold
 it is a question for ProGlove's DPO/IT; everything here can be redeployed into
 a company account unchanged.
 
@@ -36,9 +36,11 @@ data (step 7) before then, or upgrade the plan.
 1. Top right → your account name → **Security credentials** → **Assign MFA**
    for the root user (use an authenticator app). An AWS account without MFA
    is the most common way these accounts get hijacked.
-2. Top right, next to your account name: set the region to
-   **Europe (Frankfurt) eu-central-1**. Every step below assumes it.
-   (If CloudFormation later shows a different region, switch it back here.)
+2. Top right, next to your account name: pick the region, e.g.
+   **Europe (Frankfurt) eu-central-1** or **Europe (Stockholm) eu-north-1**.
+   Any EU region works; what matters is using the SAME one every time you
+   come back, because the stack and table only appear in their own region.
+   (The first deployment, 2026-09-28, landed in eu-north-1.)
 
 ## 1. Make the event key
 
@@ -104,7 +106,12 @@ curl -s -X POST "$API/checkins" -H 'content-type: application/json' -H "x-event-
 curl -s -X POST "$API/checkins" -H 'content-type: application/json' -H 'x-event-key: wrong' -d '{}'; echo
 ```
 
-Then remove the test row: search **DynamoDB** → **Tables** →
+A trailing `/` on `API` is harmless. Only the event key must stay secret: the
+API address alone gets nothing but `bad event key`. If the key ever leaks,
+CloudFormation → the stack → **Update** → *Use current template* → enter a new
+EventKey, then open each phone's setup link again with the new key.
+
+Then remove the test row (otherwise it shows up as a "walk-in" in the list): search **DynamoDB** → **Tables** →
 `propulse-checkins` → **Explore table items** → tick the row with
 `propulse_id` 9999999 → **Actions** → **Delete items**.
 
@@ -133,10 +140,13 @@ is back. The **Unsynced** counter shows how many are still waiting.
 
 ## 7. Export the attendance list
 
-In CloudShell (make sure the region is still Frankfurt):
+In CloudShell. Use the region your stack is in: it is the part of the ApiUrl
+after `execute-api.` (e.g. `eu-north-1` for Stockholm, `eu-central-1` for
+Frankfurt). The first line reads it from the stack, so you do not have to:
 
 ```bash
-aws dynamodb scan --table-name propulse-checkins --region eu-central-1 --output json \
+REGION=$(aws cloudformation describe-stacks --stack-name propulse-checkins --query 'Stacks[0].Outputs[?OutputKey==`ApiUrl`].OutputValue' --output text | sed -E 's/.*execute-api\.([^.]+)\..*/\1/'); echo "region: $REGION"
+aws dynamodb scan --table-name propulse-checkins --region "$REGION" --output json \
  | jq -r '["propulse_id","scanned_at","device_id","matched","idempotency_key"],
           (.Items[] | [.propulse_id.S, .scanned_at.S, .device_id.S, "", .idempotency_key.S]) | @csv' \
  > attendance-aws.csv && wc -l attendance-aws.csv
