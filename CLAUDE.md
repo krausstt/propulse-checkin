@@ -135,7 +135,7 @@ not the default. This is the contingency if test 1 comes back "hard fail".
 |---|---|
 | App | Buildless PWA, plain ES modules, no bundler, no framework |
 | Hosting | GitHub Pages, **code only**. Custom ProGlove subdomain before the phones are provisioned (the LNA grant is per origin; `*.github.io` grants are void after a move) |
-| Backend | **AWS, reinstated 2026-09-24 for the attendance record only**: CloudFormation `aws/template.yaml` → HTTP API (throttled, CORS to the Pages origin) → Lambda `aws/lambda.cjs` → DynamoDB `propulse-checkins` in `eu-central-1`. Tobias's private free-plan account. Receives exactly `idempotency_key, propulse_id, scanned_at, device_id` (+ server `received_at`); any fifth field rejects the request. Guide: `docs/aws-setup.md` |
+| Backend | **AWS, reinstated 2026-09-24 for the attendance record only**: CloudFormation `aws/template.yaml` → HTTP API (throttled, CORS to the Pages origin) → Lambda `aws/lambda.cjs` → DynamoDB `propulse-checkins`. **Deployed 2026-09-28 in `eu-north-1` (Stockholm)**, not the planned eu-central-1; all three verification curls passed. Tobias's private free-plan account. Receives exactly `idempotency_key, propulse_id, scanned_at, device_id` (+ server `received_at`); any fifth field rejects the request. Guide: `docs/aws-setup.md` |
 | Roster | The Excel CSV export, carried to each phone **by hand** via company OneDrive/Teams, imported and reduced on the phone (*Import registrant CSV*), held in IndexedDB. `roster.json` also accepted |
 | Check-ins | Append-only on the phone, client-generated UUID idempotency key, **no name**. Synced every 15 s when a setup link (`?api=…&key=…`) has been opened on the phone; only server-confirmed keys count as synced. The phone log stays the primary copy |
 
